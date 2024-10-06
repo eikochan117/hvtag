@@ -35,7 +35,10 @@ print("CVs:")
 cvs_q = soup.find_all("a", href=re.compile("CVWorks"))
 cvs = list()
 for cv in cvs_q:
-    cvs.append(cv.get_text())
+    if "N/A" in cv.get_text():
+        cvs.append("Missing CV")
+    else:
+        cvs.append(cv.get_text())
 print(cvs)
 
 # urlimg = "https://hvdb.me/WorkImages/RJ" + rjcode + ".jpg"
