@@ -1,2 +1,5 @@
 mutagen
-beautifulsoup4
+shutil
+yaml
+asyncio
+dlsite_async
