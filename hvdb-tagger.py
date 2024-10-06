@@ -62,6 +62,8 @@ def tag(cw, command):
                 useNoname = True
             elif "--first-char" in c:
                 useFirstChar = True
+            elif "--space" in c:
+                splitChar = " "
             elif i == len(cs) - 1:
                 splitChar = c
             i += 1
@@ -89,11 +91,15 @@ def tag(cw, command):
         m["albumartist"] = circle
         m["titlesort"] = rjcode
         m.save()
+    open(cw + "/.tagged", 'a').close()
 
 
 mode = "single"
 if  "--batch" in sys.argv:
     mode = "batch"
+
+if  "--clean" in sys.argv:
+    mode = "clean"
 
 cwd = os.getcwd()
 splitChar = sys.argv[1]
@@ -103,13 +109,24 @@ if mode == "batch":
     for folder in folders:
         if "RJ" in folder:
             print(folder)
-            files = [f for f in os.listdir(cwd + "/" + folder) if f.endswith(".mp3")]
-            if len(files) > 0 :
-                print(files[0])
-                command = input("Command ([--remove <text>, --no-title, --first-char, --wide] <separator>) : ")
-                tag(folder, command)
+            if os.path.isfile(cwd + "/" + folder + "/.tagged"):
+                print("Folder " + folder + " already processed.")
             else:
-                print("No valid file found in " + folder + " !")
+                files = [f for f in os.listdir(cwd + "/" + folder) if f.endswith(".mp3")]
+                if len(files) > 0 :
+                    print(files[0])
+                    command = input("Command ([--remove <text>, --no-title, --first-char, --wide] <separator>) : ")
+                    tag(folder, command)
+                else:
+                    print("No valid file found in " + folder + " !")
+elif mode == "clean":
+    folders = [f for f in os.listdir(cwd) if os.path.isdir(os.path.join(cwd, f))]
+    for folder in folders:
+        if "RJ" in folder:
+            print(folder)
+            if os.path.isfile(cwd + "/" + folder + "/.tagged"):
+                os.remove(cwd + "/" + folder + "/.tagged")
+    print("done")
 else:
     tag(cwd, splitChar)
 
