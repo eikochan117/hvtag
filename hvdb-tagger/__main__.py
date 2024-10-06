@@ -31,6 +31,18 @@ def convertWide(t):
     return t
 
 uncensoredTags = yaml.safe_load(open(os.getenv("HVDB_PATH") + "/uncensoredTags.yaml", "r"))
+circles = dict()
+
+def lookForCircle(circle):
+    if circle in circles:
+        return circles[circle]
+    else:
+        print("collecting real name of circle "+ circle + "...")
+        circleDl = asyncio.run(query_circle(circle))
+        circles[circle] = circleDl.maker_name
+        print("Done, it's " + circleDl.maker_name)
+        return circleDl.maker_name
+
 
 def uncensorTag(t):
     if t in uncensoredTags : 
@@ -47,12 +59,15 @@ async def query_circle(rg):
 
 def tag(cw, args):
     rjcode = os.path.basename(cw)
-    work = asyncio.run(query_work(rjcode))
     print("collecting DLsite data...")
+    try :
+        work = asyncio.run(query_work(rjcode))
+    except : 
+        print("Error while looking for data on this work. It may have been unlisted.")
+        return
     album = work.work_name
-    print("collecting real name of circle "+ work.circle + "...")
-    circleDl = asyncio.run(query_circle(work.maker_id))
-    circle = circleDl.maker_name
+    
+    circle = lookForCircle(work.maker_id)
     cvs = list()
     if work.voice_actor != None:
         for cv in work.voice_actor:
