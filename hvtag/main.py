@@ -181,6 +181,8 @@ if __name__ == "__main__":
                     if len(files) > 0 :
                         print(files[0])
                         if not kwargs["tags"] :
+                            print("Please input the separator character between track number and title.")
+                            print("(Available commands : --remove, --first, --space, --wide, --index)")
                             args = vars(singleParser.parse_args(input().split(" ")))
                         else :
                             args = kwargs
