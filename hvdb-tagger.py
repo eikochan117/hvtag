@@ -46,7 +46,8 @@ print(cvs)
 files = [f for f in os.listdir(cwd) if f.endswith(".mp3")]
 
 for f in files:
-    splits = f.split(splitChar)
+    fname = f.replace(".mp3", "")
+    splits = fname.split(splitChar)
     num = re.sub(r'\D', '', splits[0])
     trackName = splits[1]
     print(f)
