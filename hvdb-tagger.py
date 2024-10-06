@@ -78,7 +78,7 @@ def tag(cw, command):
         else:
             splits = fname.split(splitChar)
             trackName = splits[1]
-            num = re.sub(r'\D', '', fname)
+            num = re.sub(r'\D', '', splits[0])
 
         print(f)
         print("   Tr." + num + " : " + trackName)
