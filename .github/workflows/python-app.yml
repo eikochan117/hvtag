@@ -28,8 +28,8 @@ jobs:
         
     - name: Calculate SHA256
       run: |
-        $hash = (Get-FileHash .\dist\hvta.exe -Algorithm SHA256).Hash
-        $hash | Out-File -FilePath .\dist\hvta.exe.sha256
+        $hash = (Get-FileHash .\dist\hvtag.exe -Algorithm SHA256).Hash
+        $hash | Out-File -FilePath .\dist\hvtag.exe.sha256
         echo "SHA256=$hash" >> $env:GITHUB_ENV
 
     - name: Create Release
@@ -51,8 +51,8 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: .\dist\hvta.exe
-        asset_name: hvta.exe
+        asset_path: .\dist\hvtag.exe
+        asset_name: hvtag.exe
         asset_content_type: application/octet-stream
 
     - name: Upload Checksum
@@ -61,6 +61,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: .\dist\hvta.exe.sha256
-        asset_name: hvta.exe.sha256
+        asset_path: .\dist\hvtag.exe.sha256
+        asset_name: hvtag.exe.sha256
         asset_content_type: text/plain
