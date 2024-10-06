@@ -1,5 +1,3 @@
 mutagen
-shutil
-yaml
 asyncio
 dlsite_async
