@@ -97,7 +97,8 @@ def tag(cw, command):
             num = f[0:i]
         else:
             splits = fname.split(splitChar)
-            trackName = splits[1]
+            trackNameIndex = min(1, len(splits) - 1)
+            trackName = splits[trackNameIndex]
             num = re.sub(r'\D', '', splits[0])
 
         print(f)
