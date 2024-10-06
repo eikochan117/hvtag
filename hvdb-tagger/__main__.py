@@ -3,12 +3,10 @@
 from mutagen.easyid3 import *
 import mutagen
 import os
-import sys
 import re
 import requests
 import argparse
 import shutil
-from bs4 import BeautifulSoup
 import yaml
 
 import asyncio
@@ -110,7 +108,7 @@ def tag(cw, args):
             print(f)
             print("   Tr." + num + " : " + trackName)
         filePath = cw + "/" + f
-        try : 
+        try :
             m = EasyID3(filePath)
         except mutagen.id3.ID3NoHeaderError:
             m = mutagen.File(filePath, easy=True)
@@ -128,7 +126,9 @@ def tag(cw, args):
         else:
             m["genre"] = "\x00".join(tags)
         m["albumartist"] = circle
-        m["titlesort"] = rjcode
+        m["albumsort"] = rjcode
+        date = work.regist_date
+        m["date"] = str(date.year) + "-" + str(date.month) + "-" + str(date.day)
         m.save()
     if args["image"]:
         print("Downloading work image...")
