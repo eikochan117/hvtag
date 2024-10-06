@@ -103,7 +103,8 @@ def tag(cw, args):
             else:
                 splits = fname.split(splitChar)
                 trackNameIndex = min(args["index"] + 1, len(splits) - 1)
-                trackName = splits[trackNameIndex]
+                # trackName = splits[trackNameIndex]
+                trackName = fname.replace(splits[args["index"]], "")
                 num = re.sub(r'\D', '', splits[args["index"]])
             print(f)
             print("   Tr." + num + " : " + trackName)
