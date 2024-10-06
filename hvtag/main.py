@@ -28,7 +28,7 @@ def convertWide(t):
     t = t.replace("：", ":")
     return t
 
-uncensoredTags = yaml.safe_load(open(os.getenv("HVDB_PATH") + "/uncensoredTags.yaml", "r"))
+uncensoredTags = yaml.safe_load(open(os.getenv("HVTAG_PATH") + "/uncensoredTags.yaml", "r"))
 circles = dict()
 
 def lookForCircle(circle):
