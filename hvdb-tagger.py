@@ -9,6 +9,21 @@ from bs4 import BeautifulSoup
 
 bl_tags = ["non-mega link", "broken link", "mp3 only", "outdated"]
 
+def convertWide(t):
+    t = t.replace("０", "0")
+    t = t.replace("１", "1")
+    t = t.replace("２", "2")
+    t = t.replace("３", "3")
+    t = t.replace("４", "4")
+    t = t.replace("５", "5")
+    t = t.replace("６", "6")
+    t = t.replace("７", "7")
+    t = t.replace("８", "8")
+    t = t.replace("９", "9")
+    t = t.replace("：", ":")
+    return t
+
+
 def tag(cw, command):
     rjcode = os.path.basename(cw)
     print("collecting HVDB data... ")
@@ -64,11 +79,13 @@ def tag(cw, command):
                 useFirstChar = True
             elif "--space" in c:
                 splitChar = " "
+            elif "--wide" in c:
+                fname = convertWide(fname)
             elif i == len(cs) - 1:
                 splitChar = c
             i += 1
 
-        num = "1"
+        num = "0"
         trackName = fname
         if useNoname:
             if len(files) > 1:
@@ -118,7 +135,7 @@ if mode == "batch":
                 files = [f for f in os.listdir(cwd + "/" + folder) if f.endswith(".mp3")]
                 if len(files) > 0 :
                     print(files[0])
-                    command = input("Command ([--remove <text>, --no-title, --first-char, --wide] <separator>) : ")
+                    command = input("Command ([--remove <text>, --no-title, --first-char, --space, --wide] <separator>) : ")
                     tag(folder, command)
                 else:
                     print("No valid file found in " + folder + " !")
