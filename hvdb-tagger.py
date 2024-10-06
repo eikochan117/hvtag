@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from mutagen.easyid3 import *
+import mutagen
 import os
 import sys
 import re
@@ -53,11 +54,6 @@ def tag(cw, command):
             cvs.append(cv.get_text())
     print(cvs)
 
-    # urlimg = "https://hvdb.me/WorkImages/RJ" + rjcode + ".jpg"
-    # img = requests.get(urlimg).content
-    # with open("folder.jpg", "wb") as f:
-    #     f.write(img)
-
     files = [f for f in os.listdir(cw) if f.endswith(".mp3")]
 
     for f in files:
@@ -103,7 +99,12 @@ def tag(cw, command):
 
         print(f)
         print("   Tr." + num + " : " + trackName)
-        m = EasyID3(cw + "/" + f)
+        filePath = cw + "/" + f
+        try : 
+            m = EasyID3(filePath)
+        except mutagen.id3.ID3NoHeaderError:
+            m = mutagen.File(filePath, easy=True)
+            m.add_tags()
         m["tracknumber"] = num
         m["title"] = trackName
         m["album"] = album
@@ -123,7 +124,7 @@ if  "--clean" in sys.argv:
     mode = "clean"
 
 cwd = os.getcwd()
-splitChar = sys.argv[1]
+args = sys.argv
 
 if mode == "batch":
     folders = [f for f in os.listdir(cwd) if os.path.isdir(os.path.join(cwd, f))]
@@ -149,6 +150,6 @@ elif mode == "clean":
                 os.remove(cwd + "/" + folder + "/.tagged")
     print("done")
 else:
-    tag(cwd, splitChar)
+    tag(cwd, args)
 
 
