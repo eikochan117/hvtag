@@ -74,7 +74,10 @@ def tag(cw, command):
             if len(files) > 1:
                 num = re.sub(r'\D', '', fname)
         elif useFirstChar:
-            num = trackName[0]
+            i = 0
+            while f[i].isdigit():
+                i = i + 1
+            num = f[0:i]
         else:
             splits = fname.split(splitChar)
             trackName = splits[1]
