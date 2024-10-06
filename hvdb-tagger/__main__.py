@@ -107,8 +107,9 @@ def tag(cw, args):
         m.save()
     open(cw + "/.tagged", 'a').close()
     if args["move"] != "":
+        print("Moving " + cw + " to " + newPath + " ...")
         newPath = shutil.move(cw, args["move"])
-        print("Moved " + cw + " to " + newPath)
+        print("Done.")
 
 
 if __name__ == "__main__":
