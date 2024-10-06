@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [windows-latest]
       
     runs-on: ${{ matrix.os }}
     
@@ -52,5 +52,3 @@ jobs:
           name: ${{ runner.os }} Build
           path: |
             build/*.exe
-            build/*.bin
-            build/*.app/**/*
