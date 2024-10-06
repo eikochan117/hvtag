@@ -28,7 +28,7 @@ def convertWide(t):
     t = t.replace("：", ":")
     return t
 
-uncensoredTags = yaml.safe_load(open(os.getenv("HVTAG_PATH") + "/uncensoredTags.yaml", "r"))
+dictionary = []
 circles = dict()
 
 def lookForCircle(circle):
@@ -41,10 +41,9 @@ def lookForCircle(circle):
         print("Done, it's " + circleDl.maker_name)
         return circleDl.maker_name
 
-
-def uncensorTag(t):
-    if t in uncensoredTags : 
-        return uncensoredTags[t]
+def convertTag(t):
+    if t in dictionary : 
+        return dictionary[t]
     return t
 
 async def query_work(rj):
@@ -73,7 +72,7 @@ def tag(cw, args):
     tags = list()
     if work.genre != None:
         for tag in work.genre:
-            tags.append(uncensorTag(tag.lower()))
+            tags.append(convertTag(tag.lower()))
     files = [f for f in os.listdir(cw) if f.endswith(".mp3")]
 
     for f in files:
@@ -154,6 +153,7 @@ if __name__ == "__main__":
     parser.add_argument("--force", "-f", action="store_true", help="Force tagging even with .tagged file present.")
     parser.add_argument("--clean", "-c", action="store_true", help="Remove .tagged files.")
     parser.add_argument("--tags", "-t", action="store_true", help="Keep track number, only update tags.", default=False)
+    parser.add_argument("--no-dict", action="store_true", help="Process tagging regardless of presence of dictionary.yaml file.", default=False)
     parser.add_argument("--image", action="store_true", help="Add/Replace folder.jpeg with Dlsite's work image.", default=False)
     parser.add_argument("--move", "-m", type=str, help="Move tagged folder to destination.", default="")
 
@@ -170,6 +170,13 @@ if __name__ == "__main__":
     cwd = os.getcwd()
 
     if kwargs["batch"] :
+        if os.path.isfile("./dictionary.yaml") :
+            dictionary = yaml.safe_load(open("./dictionary.yaml", "r"))
+        elif kwargs["no-dict"]:
+            print("No dictionary.yaml found in current directory, skipping...")
+        else:
+            print("No dictionary.yaml found in current directory, use option '--no-dict' to process anyway. Exiting.")
+            exit()
         folders = [f for f in os.listdir(cwd) if os.path.isdir(os.path.join(cwd, f))]
         for folder in folders:
             if "RJ" in folder:
