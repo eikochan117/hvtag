@@ -7,6 +7,7 @@ import sys
 import re
 import requests
 import argparse
+import shutil
 from bs4 import BeautifulSoup
 def convertWide(t):
     t = t.replace("０", "0")
@@ -105,6 +106,9 @@ def tag(cw, args):
         m["titlesort"] = rjcode
         m.save()
     open(cw + "/.tagged", 'a').close()
+    if args["move"] != "":
+        newPath = shutil.move(cw, args["move"])
+        print("Moved " + cw + " to " + newPath)
 
 
 if __name__ == "__main__":
@@ -117,6 +121,7 @@ if __name__ == "__main__":
     parser.add_argument("--force", "-f", action="store_true", help="Force tagging even with .tagged file present.")
     parser.add_argument("--clean", "-c", action="store_true", help="Remove .tagged files.")
     parser.add_argument("--jp", "-j", action="store_true", help="Only keep JP names.")
+    parser.add_argument("--move", "-m", type=str, help="Move tagged folder to destination.", default="")
 
     singleParser = argparse.ArgumentParser()
     singleParser.add_argument("--remove", "-r", type=str, help="Filter out text from title to parse track number", default="")
@@ -125,6 +130,7 @@ if __name__ == "__main__":
     singleParser.add_argument("--wide", "-w", action="store_true", help="Convert wide number")
     singleParser.add_argument("--index", "-i", type=int, help="Specify split index", default=0)
     singleParser.add_argument("--jp", "-j", action="store_true", help="Only keep JP names.")
+    singleParser.add_argument("--move", "-m", type=str, help="Move tagged folder to destination.", default="")
     singleParser.add_argument("split", default="\x00")
 
     kwargs = vars(parser.parse_args())
@@ -144,6 +150,8 @@ if __name__ == "__main__":
                         args = vars(singleParser.parse_args(input().split(" ")))
                         if kwargs["jp"]:
                             args["jp"] = True
+                        if kwargs["move"] != "":
+                            args["move"] = kwargs["move"]
                         tag(folder, args)
                     else:
                         print("No valid file found in " + folder + " !")
