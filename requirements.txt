@@ -1,3 +1,4 @@
 mutagen
 asyncio
 dlsite_async
+requests
