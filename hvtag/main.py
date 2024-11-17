@@ -196,7 +196,12 @@ if __name__ == "__main__":
                     print("Folder " + folder + " already processed.")
                 else:
                     files = [f for f in os.listdir(cwd + "/" + folder) if f.endswith(".mp3")]
-                    if len(files) > 0 :
+                    files2 = [f for f in os.listdir(cwd + "/" + folder) if f.endswith(".wav")]
+                    lf2Count = 0
+                    if kwargs["convert"]:
+                        lf2Count = 1
+                    lf = len(files) + len(files2) * lf2Count
+                    if lf > 0 :
                         print(files[0])
                         if not kwargs["tags"] :
                             print("Please input the separator character between track number and title.")
