@@ -3,7 +3,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
     <metadata>
       <id>hvtag</id>
-      <version>1.0.7</version>
+      <version>1.0.9</version>
       <title>hvtag</title>
       <authors>eikochan</authors>
       <description>python script that tag mp3 files according to Dlsite.</description>

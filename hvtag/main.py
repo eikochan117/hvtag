@@ -166,7 +166,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-dict", action="store_true", help="Process tagging regardless of presence of dictionary.yaml file.", default=False)
     parser.add_argument("--image", action="store_true", help="Add/Replace folder.jpeg with Dlsite's work image.", default=False)
     parser.add_argument("--move", "-m", type=str, help="Move tagged folder to destination.", default="")
-    parser.add_argument("--convert", "-w", type="store_true", help="Convert .wav files to .mp3 320kbps. Delete source.", default=False)
+    parser.add_argument("--convert", "-w", action="store_true", help="Convert .wav files to .mp3 320kbps. Delete source.", default=False)
 
     singleParser = argparse.ArgumentParser()
     singleParser.add_argument("--remove", "-r", type=str, help="Filter out text from title to parse track number", default="")

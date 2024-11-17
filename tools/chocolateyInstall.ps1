@@ -1,8 +1,8 @@
 $ErrorActionPreference = 'Stop'
 
 $toolsDir   = "$(Split-Path -parent $MyInvocation.MyCommand.Definition)"
-$url        = 'https://github.com/eikochan117/hvtag/releases/download/v1.0.7/hvtag.exe'
-$checksumUrl = 'https://github.com/eikochan117/hvtag/releases/download/v1.0.7/hvtag.exe.sha256'
+$url        = 'https://github.com/eikochan117/hvtag/releases/download/v1.0.9/hvtag.exe'
+$checksumUrl = 'https://github.com/eikochan117/hvtag/releases/download/v1.0.9/hvtag.exe.sha256'
 
 # Récupérer le checksum depuis GitHub
 $checksum = (New-Object System.Net.WebClient).DownloadString($checksumUrl).Split('
