@@ -163,7 +163,7 @@ if __name__ == "__main__":
     parser.add_argument("--force", "-f", action="store_true", help="Force tagging even with .tagged file present.")
     parser.add_argument("--clean", "-c", action="store_true", help="Remove .tagged files.")
     parser.add_argument("--tags", "-t", action="store_true", help="Keep track number, only update tags.", default=False)
-    parser.add_argument("--no-dict", action="store_true", help="Process tagging regardless of presence of dictionary.yaml file.", default=False)
+    parser.add_argument("--no_dict", action="store_true", help="Process tagging regardless of presence of dictionary.yaml file.", default=False)
     parser.add_argument("--image", action="store_true", help="Add/Replace folder.jpeg with Dlsite's work image.", default=False)
     parser.add_argument("--move", "-m", type=str, help="Move tagged folder to destination.", default="")
     parser.add_argument("--convert", "-w", action="store_true", help="Convert .wav files to .mp3 320kbps. Delete source.", default=False)
@@ -183,7 +183,7 @@ if __name__ == "__main__":
     if kwargs["batch"] :
         if os.path.isfile("./dictionary.yaml") :
             dictionary = yaml.safe_load(open("./dictionary.yaml", "r"))
-        elif kwargs["no-dict"]:
+        elif kwargs["no_dict"]:
             print("No dictionary.yaml found in current directory, skipping...")
         else:
             print("No dictionary.yaml found in current directory, use option '--no-dict' to process anyway. Exiting.")
