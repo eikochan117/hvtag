@@ -59,8 +59,8 @@ def convertWavToMp3(filename):
     ffmpeg = (
         FFmpeg()
         .input(filename)
-        .output(filename.replace(".wav", ".mp3"), 
-                audio_bitrate="320k")
+        .output(filename.replace(".wav", ".mp3")
+                , {"acodec": "libmp3lame", "b:a": "320k"})
     )
 
     ffmpeg.execute()
