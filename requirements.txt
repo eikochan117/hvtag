@@ -3,3 +3,4 @@ asyncio
 dlsite_async
 requests
 pyyaml
+python-ffmpeg

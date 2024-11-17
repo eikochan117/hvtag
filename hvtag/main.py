@@ -8,6 +8,7 @@ import requests
 import argparse
 import shutil
 import yaml
+import ffmpeg
 
 import asyncio
 from dlsite_async import DlsiteAPI
@@ -54,6 +55,11 @@ async def query_circle(rg):
     async with DlsiteAPI() as api:
         return await api.get_circle(rg)
 
+def convertWavToMp3(filename):
+    ffmpeg.input(filename).output(filename.replace(".wav", ".mp3"), audio_bitrate="320k").run()
+    os.remove(filename)
+        
+
 def tag(cw, args):
     rjcode = os.path.basename(cw)
     print("collecting DLsite data...")
@@ -73,6 +79,10 @@ def tag(cw, args):
     if work.genre != None:
         for tag in work.genre:
             tags.append(convertTag(tag.lower()))
+    if args["convert"]:
+        filesToConvert = [f for f in os.listdir(cw) if f.endswith(".wav")]
+        for f in filesToConvert:
+            convertWavToMp3(f)
     files = [f for f in os.listdir(cw) if f.endswith(".mp3")]
 
     for f in files:
@@ -156,6 +166,7 @@ if __name__ == "__main__":
     parser.add_argument("--no-dict", action="store_true", help="Process tagging regardless of presence of dictionary.yaml file.", default=False)
     parser.add_argument("--image", action="store_true", help="Add/Replace folder.jpeg with Dlsite's work image.", default=False)
     parser.add_argument("--move", "-m", type=str, help="Move tagged folder to destination.", default="")
+    parser.add_argument("--convert", "-w", type="store_true", help="Convert .wav files to .mp3 320kbps. Delete source.", default=False)
 
     singleParser = argparse.ArgumentParser()
     singleParser.add_argument("--remove", "-r", type=str, help="Filter out text from title to parse track number", default="")
@@ -189,12 +200,13 @@ if __name__ == "__main__":
                         print(files[0])
                         if not kwargs["tags"] :
                             print("Please input the separator character between track number and title.")
-                            print("(Available commands : --remove, --first, --space, --wide, --index)")
+                            print("(Available commands : --remove, --first, --space, --wide, --index, --default)")
                             args = vars(singleParser.parse_args(input().split(" ")))
                         else :
                             args = kwargs
                         args["tags"] = kwargs["tags"]
                         args["image"] = kwargs["image"]
+                        args["convert"] = kwargs["convert"]
                         if kwargs["move"] != "":
                             args["move"] = kwargs["move"]
                         tag(folder, args)
