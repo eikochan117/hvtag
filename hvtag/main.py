@@ -8,7 +8,7 @@ import requests
 import argparse
 import shutil
 import yaml
-import ffmpeg
+from ffmpeg import FFmpeg
 
 import asyncio
 from dlsite_async import DlsiteAPI
@@ -56,7 +56,14 @@ async def query_circle(rg):
         return await api.get_circle(rg)
 
 def convertWavToMp3(filename):
-    ffmpeg.input(filename).output(filename.replace(".wav", ".mp3"), audio_bitrate="320k").run()
+    ffmpeg = (
+        FFmpeg()
+        .input(filename)
+        .output(filename.replace(".wav", ".mp3"), 
+                audio_bitrate="320k")
+    )
+
+    ffmpeg.execute()
     os.remove(filename)
         
 
