@@ -206,7 +206,7 @@ if __name__ == "__main__":
                     if kwargs["convert"]:
                         for f in files2:
                             print("Converting " + f + "...")
-                            convertWavToMp3(f)
+                            convertWavToMp3(cwd + "/" + folder + "/" + f)
                     files = [f for f in os.listdir(cwd + "/" + folder) if f.endswith(".mp3")]
                     if len(files) > 0 :
                         print(files[0])
