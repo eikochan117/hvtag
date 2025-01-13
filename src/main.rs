@@ -1,7 +1,7 @@
 use std::io;
 
 use clap::Parser;
-use types::local::WorkDetails;
+use types::{dlsite::DlSiteProductScrapResult, local::WorkDetails};
 mod tagger;
 mod types;
 mod dlsite;
@@ -41,6 +41,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let a = PrgmArgs::try_parse_from(sa)?;
     // println!("{a:?}");
     let hm = WorkDetails::build_from_rjcode("RJ01293993".to_string()).await.unwrap();
-    println!("={:?}=", hm);
+    let hp = DlSiteProductScrapResult::build_from_rjcode("RJ01293993".to_string()).await;
     Ok(())
 }
