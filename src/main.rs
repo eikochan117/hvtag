@@ -1,7 +1,8 @@
 use std::io;
 
 use clap::Parser;
-use types::{dlsite::DlSiteProductScrapResult, local::WorkDetails};
+use dlsite::scrapper::DlSiteProductScrapResult;
+use types::local::WorkDetails;
 mod tagger;
 mod types;
 mod dlsite;

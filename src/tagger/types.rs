@@ -1,4 +1,5 @@
-use super::dlsite::DlSiteProductIdResult;
+use crate::dlsite::types::DlSiteProductIdResult;
+
 #[derive(Debug)]
 pub enum AgeCategory {
     Other = 0,
