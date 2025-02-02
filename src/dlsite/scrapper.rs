@@ -1,12 +1,13 @@
 use reqwest::Url;
 use scraper::{Html, Selector};
 
+#[derive(Debug)]
 pub struct DlSiteProductScrapResult {
     pub genre: Vec<String>
 }
 
 impl DlSiteProductScrapResult {
-    pub async fn build_from_rjcode(rjcode: String) {
+    pub async fn build_from_rjcode(rjcode: String) -> DlSiteProductScrapResult {
         let url = format!("https://www.dlsite.com/maniax/work/=/product_id/{rjcode}.html").parse::<Url>().unwrap();
         // let resp = reqwest::get(&url).awai   t.unwrap();
         let resp = reqwest::Client::new()
@@ -22,11 +23,18 @@ impl DlSiteProductScrapResult {
         let selector = Selector::parse(".main_genre").unwrap();
 
         println!("querying...");
+        let mut genre = vec![];
         if let Some(elem) = document.select(&selector).next() {
             let content = elem.text().filter(|x| !x.contains("\n")).collect::<Vec<_>>();
             for c in content {
-                
+                genre.push(c.to_string());
             }
+
+            DlSiteProductScrapResult {
+                genre
+            }
+        } else {
+            todo!();
         }
     }
 }
