@@ -24,7 +24,9 @@ impl DlSiteProductScrapResult {
         println!("querying...");
         if let Some(elem) = document.select(&selector).next() {
             let content = elem.text().filter(|x| !x.contains("\n")).collect::<Vec<_>>();
-            println!("{content:?}");
+            for c in content {
+                
+            }
         }
     }
 }

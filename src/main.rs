@@ -1,10 +1,9 @@
 use std::io;
 
 use clap::Parser;
-use dlsite::scrapper::DlSiteProductScrapResult;
-use types::local::WorkDetails;
+use dlsite::{scrapper::DlSiteProductScrapResult, types::DlSiteProductIdResult};
+use tagger::types::WorkDetails;
 mod tagger;
-mod types;
 mod dlsite;
 
 #[derive(Parser, Debug)]

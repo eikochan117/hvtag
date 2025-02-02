@@ -1,6 +1,8 @@
 use std::{collections::HashMap, error::Error};
 
-use crate::types::{dlsite::DlSiteProductIdResult, local::WorkDetails};
+use crate::tagger::types::WorkDetails;
+
+use super::types::DlSiteProductIdResult;
 
 impl WorkDetails {
     pub async fn build_from_rjcode(rjcode: String) -> Result<Self, Box<dyn Error>> {
