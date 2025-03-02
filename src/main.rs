@@ -1,10 +1,14 @@
 use std::io;
 
 use clap::Parser;
+use database::db_loader::get_default_db_path;
 use dlsite::{scrapper::DlSiteProductScrapResult, types::DlSiteProductIdResult};
+use folders::types::ManagedFolder;
 use tagger::types::WorkDetails;
 mod tagger;
 mod dlsite;
+mod folders;
+mod database;
 
 #[derive(Parser, Debug)]
 struct PrgmArgs {
@@ -40,7 +44,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let sa = sa.split(" ");
     // let a = PrgmArgs::try_parse_from(sa)?;
     // println!("{a:?}");
-    let hm = WorkDetails::build_from_rjcode("RJ01293993".to_string()).await.unwrap();
-    let hp = DlSiteProductScrapResult::build_from_rjcode("RJ01293993".to_string()).await;
+    //let f = ManagedFolder::new("./RJ01306319");
+    //let hm = WorkDetails::build_from_rjcode(f.rjcode.clone()).await.unwrap();
+    //let hp = DlSiteProductScrapResult::build_from_rjcode(f.rjcode.clone()).await;
+    //println!("{f:?}");
+    //println!("{hm:?}");
+    //println!("{hp:?}");
+    let p = get_default_db_path();
+    println!("{p:?}");
     Ok(())
 }
