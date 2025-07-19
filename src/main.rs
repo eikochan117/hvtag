@@ -5,6 +5,11 @@ use database::db_loader::get_default_db_path;
 use dlsite::{scrapper::DlSiteProductScrapResult, types::DlSiteProductIdResult};
 use folders::types::ManagedFolder;
 use tagger::types::WorkDetails;
+
+use crate::database::{db_loader::open_db, init};
+
+mod errors;
+use errors::*;
 mod tagger;
 mod dlsite;
 mod folders;
@@ -38,6 +43,8 @@ struct PrgmArgs {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = PrgmArgs::parse();
+    let db = open_db(None)?;
+    init(&db)?;
     // let mut s = String::new();
     // io::stdin().read_line(&mut s).unwrap();
     // let sa = format!("prgm {s}");

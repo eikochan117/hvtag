@@ -1,34 +1,8 @@
 use std::{env, error::Error, fmt::Display, fs, path::{self, Path}};
 
-use duckdb::{Connection};
+use rusqlite::Connection;
 
-#[derive(Debug)]
-pub enum DbLoaderError {
-    UnsupportedOS(String),
-    PathCreationFailed(String),
-    UnavailableEnvVariable(String),
-    DuckDbError(duckdb::Error)
-}
-
-impl From<duckdb::Error> for DbLoaderError {
-    fn from(value: duckdb::Error) -> Self {
-        Self::DuckDbError(value)
-    }
-}
-
-impl Error for DbLoaderError {}
-
-impl Display for DbLoaderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DbLoaderError::UnsupportedOS(x) => write!(f, "Operating System is not supported : {x}"),
-            DbLoaderError::PathCreationFailed(x) => write!(f, "Could not create path : {x}"),
-            DbLoaderError::UnavailableEnvVariable(x) => write!(f, "Could not get env value : {x}"),
-            DbLoaderError::DuckDbError(x) => write!(f, "DuckDb error : {x}")
-        }
-    }
-}
-
+use crate::errors::DbLoaderError;
 
 pub fn get_default_db_path() -> Result<String, DbLoaderError> {
     let os = std::env::consts::OS;
