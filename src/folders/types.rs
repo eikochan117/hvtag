@@ -1,5 +1,6 @@
 use std::{fs::{read_dir, DirEntry}, path::Path};
 
+pub type RJCode = String;
 #[derive(Debug)]
 pub struct ManagedFile {
     filename: String,
@@ -26,7 +27,7 @@ pub struct ManagedFolder {
     //pub has_other_filetypes: bool,
     pub has_cover: bool,
     //pub database_id: Option<String>,
-    pub rjcode: String,
+    pub rjcode: RJCode,
     pub path: String,
     pub files: Vec<ManagedFile>,
 }

@@ -22,7 +22,6 @@ impl DlSiteProductScrapResult {
         let document = Html::parse_document(&html);
         let selector = Selector::parse(".main_genre").unwrap();
 
-        println!("querying...");
         let mut genre = vec![];
         if let Some(elem) = document.select(&selector).next() {
             let content = elem.text().filter(|x| !x.contains("\n")).collect::<Vec<_>>();

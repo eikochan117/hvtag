@@ -10,8 +10,8 @@ hvtag but rewritten in rust. Tag audio files using their RJ code according to th
 - *database* : All database related stuff
 
 ## Checklist of stuff to do
-- Scan existing library and keep track of their path, last update with Dlsite (never at first), rj code
-- Collect Dlsite tags for this existing library, ordering them in the database
+- ~~Scan existing library and keep track of their path, last update with Dlsite (never at first), rj code~~
+- ~~Collect Dlsite tags for this existing library, ordering them in the database~~
 - Allow renaming tags from Dlsite to custom ones
 - Apply those tags to existing files
 - Save query results of dlsite in the db to avoid unnecessary api spam and crawl

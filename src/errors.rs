@@ -4,6 +4,13 @@ use std::{error::Error, fmt::Display};
 pub enum HvtError {
     GenericError(Box<dyn Error>),
     FolderReadingError(String),
+    SqliteError(rusqlite::Error),
+}
+
+impl From<rusqlite::Error> for HvtError {
+    fn from(value: rusqlite::Error) -> Self {
+        Self::SqliteError(value)
+    }
 }
 
 impl Error for HvtError {}
@@ -13,6 +20,7 @@ impl Display for HvtError {
         match self {
             HvtError::GenericError(x) => write!(f, "Generic Error : {x}"),
             HvtError::FolderReadingError(x) => write!(f, "Error reading folder : {x}"),
+            HvtError::SqliteError(x) => write!(f, "Error SQLite : {x}"),
         }
     }
 }
