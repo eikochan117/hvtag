@@ -1,7 +1,20 @@
 use std::{error::Error, fmt::Display};
 
+#[derive(Debug)]
 pub enum HvtError {
-    GenericError(Box<dyn Error>)
+    GenericError(Box<dyn Error>),
+    FolderReadingError(String),
+}
+
+impl Error for HvtError {}
+
+impl Display for HvtError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HvtError::GenericError(x) => write!(f, "Generic Error : {x}"),
+            HvtError::FolderReadingError(x) => write!(f, "Error reading folder : {x}"),
+        }
+    }
 }
 
 #[derive(Debug)]

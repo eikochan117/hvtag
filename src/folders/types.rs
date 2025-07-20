@@ -21,6 +21,7 @@ impl ManagedFile {
 
 #[derive(Debug)]
 pub struct ManagedFolder {
+    pub is_valid: bool,
     pub is_tagged: bool,
     //pub has_other_filetypes: bool,
     pub has_cover: bool,
@@ -31,14 +32,16 @@ pub struct ManagedFolder {
 }
 
 impl ManagedFolder {
-    pub fn new(path: &str) -> Self {
-        let p = Path::new(path);
+    pub fn new(path: String) -> Self {
+        let p = Path::new(&path);
         let mut files = vec![];
         match read_dir(p) {
             Ok(entries) => {
                 for e in entries {
-                    if let Ok(e) = e {
-                        files.push(ManagedFile::from_direntry(e));
+                    if let Ok(en) = e {
+                        if Path::new(&en.path()).is_file() {
+                            files.push(ManagedFile::from_direntry(en));
+                        }
                     }
                 }
             }
@@ -52,7 +55,11 @@ impl ManagedFolder {
         let has_cover = files.iter().any(|x| x.filename == "folder.jpeg");
         let rjcode = p.file_name().unwrap().to_str().unwrap().to_string();
 
+        let is_valid = 
+            !files.is_empty()
+            && rjcode.starts_with("RJ");
         ManagedFolder {
+            is_valid,
             path: path.to_string(),
             files,
             is_tagged,

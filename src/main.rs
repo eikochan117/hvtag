@@ -1,15 +1,11 @@
-use std::io;
 
 use clap::Parser;
 use database::db_loader::get_default_db_path;
 use dlsite::{scrapper::DlSiteProductScrapResult, types::DlSiteProductIdResult};
-use folders::types::ManagedFolder;
-use tagger::types::WorkDetails;
 
-use crate::database::{db_loader::open_db, init};
+use crate::{database::{db_loader::open_db, init, sql::{get_max_fld_id, insert_managed_folder}}, folders::get_list_of_folders};
 
 mod errors;
-use errors::*;
 mod tagger;
 mod dlsite;
 mod folders;

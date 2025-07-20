@@ -1,4 +1,4 @@
-use std::{env, error::Error, fmt::Display, fs, path::{self, Path}};
+use std::{env, fs, path::{self, Path}};
 
 use rusqlite::Connection;
 
@@ -29,7 +29,7 @@ pub fn get_default_db_path() -> Result<String, DbLoaderError> {
         }
     }
 
-    Ok(path.to_str().map(|x| format!("{x}\\data.ddb")).unwrap())
+    Ok(path.to_str().map(|x| format!("{x}/data.db3")).unwrap())
 }
 
 pub fn open_db(custom_path: Option<&str>) -> Result<Connection, DbLoaderError> {
