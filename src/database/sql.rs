@@ -35,6 +35,13 @@ pub fn insert_managed_folder(mf: &ManagedFolder, fld_id: usize) -> String {
             )")
 }
 
+pub fn get_all_works() -> String {
+    format!(
+        "select
+            t1.rjcode
+        from {DB_FOLDERS_NAME} t1")
+}
+
 pub fn get_unscanned_works() -> String {
     format!(
         "select 
@@ -171,10 +178,22 @@ pub fn assign_rating_to_work(work: RJCode, rating: &str) -> String {
 
 pub fn assign_stars_to_work(work: RJCode, stars: f32) -> String {
     format!(
-        "insert into {DB_STARS_COLS}
+        "insert into {DB_STARS_NAME}
         select
             t1.fld_id,
             '{stars}' as stars
+        from
+            {DB_FOLDERS_NAME} t1
+        where
+            t1.rjcode = '{work}'")
+}
+
+pub fn assign_cover_link_to_work(work: RJCode, link: &str) -> String {
+    format!(
+        "insert into {DB_DLSITE_COVERS_LINK_NAME}
+        select
+            t1.fld_id,
+            '{link}' as link
         from
             {DB_FOLDERS_NAME} t1
         where

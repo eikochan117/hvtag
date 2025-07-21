@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use crate::{database::{sql::{get_max_id, get_unscanned_works, insert_managed_folder}, tables::DB_FOLDERS_NAME}, errors::HvtError, folders::types::{ManagedFolder, RJCode}};
+use crate::{database::{sql::{get_all_works, get_max_id, get_unscanned_works, insert_managed_folder}, tables::DB_FOLDERS_NAME}, errors::HvtError, folders::types::{ManagedFolder, RJCode}};
 use std::fs;
 
 pub mod types;
@@ -45,6 +45,18 @@ pub fn register_folders(conn: &Connection, folder_list: Vec<ManagedFolder>) -> R
 
 pub fn get_list_of_unscanned_works(conn: &Connection, max_cnt: Option<usize>) -> Result<Vec<RJCode>, HvtError> {
     let mut entries = conn.prepare(&get_unscanned_works())?;
+    let vals = entries.query_map([], |x| x.get("rjcode"))?;
+    let rjcodes : Vec<RJCode> = vals.map(|x| x.unwrap()).collect();
+    if let Some(x) = max_cnt {
+        let res = rjcodes.into_iter().take(x).collect();
+        Ok(res)
+    } else {
+        Ok(rjcodes)
+    }
+}
+
+pub fn get_list_of_all_works(conn: &Connection, max_cnt: Option<usize>) -> Result<Vec<RJCode>, HvtError> {
+    let mut entries = conn.prepare(&get_all_works())?;
     let vals = entries.query_map([], |x| x.get("rjcode"))?;
     let rjcodes : Vec<RJCode> = vals.map(|x| x.unwrap()).collect();
     if let Some(x) = max_cnt {

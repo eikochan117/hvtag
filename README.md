@@ -14,8 +14,8 @@ hvtag but rewritten in rust. Tag audio files using their RJ code according to th
 - ~~Collect Dlsite tags for this existing library, ordering them in the database~~
 - Allow renaming tags from Dlsite to custom ones
 - Apply those tags to existing files
-- Save query results of dlsite in the db to avoid unnecessary api spam and crawl
-- Save CVs and Circles the same way
+~~- Save query results of dlsite in the db to avoid unnecessary api spam and crawl~~
+~~- Save CVs and Circles the same way~~
 - Enable conversion of files to mp3
 - Enable renaming like previous version of hvtag
 - Try to implement smart name pattern parsing ?

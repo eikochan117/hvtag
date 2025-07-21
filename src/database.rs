@@ -21,5 +21,6 @@ pub fn init(conn: &Connection) -> Result<(), DatabaseError> {
     conn.execute(&init_table(DB_CVS_NAME, DB_CVS_COLS), [])?;
     conn.execute(&init_table(DB_LKP_WORK_CVS_NAME, DB_LKP_WORK_CVS_COLS), [])?;
     conn.execute(&init_table(DB_DLSITE_ERRORS_NAME, DB_DLSITE_ERRORS_COLS), [])?;
+    conn.execute(&init_table(DB_DLSITE_COVERS_LINK_NAME, DB_DLSITE_COVERS_LINK_COLS), [])?;
     Ok(())
 }

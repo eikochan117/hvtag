@@ -36,3 +36,6 @@ pub const DB_LKP_WORK_CVS_COLS: &str = "fld_id int, cv_id int";
 
 pub const DB_DLSITE_ERRORS_NAME: &str = "dlsite_errors";
 pub const DB_DLSITE_ERRORS_COLS: &str = "fld_id int, error_type text";
+
+pub const DB_DLSITE_COVERS_LINK_NAME: &str = "dlsite_covers";
+pub const DB_DLSITE_COVERS_LINK_COLS: &str = "fld_id int, link text";
