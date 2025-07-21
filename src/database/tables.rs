@@ -27,3 +27,9 @@ pub const DB_STARS_COLS: &str = "fld_id int, stars float";
 
 pub const DB_WORKS_NAME: &str = "works";
 pub const DB_WORKS_COLS: &str = "fld_id int, name text, img_link text";
+
+pub const DB_CVS_NAME: &str = "cvs";
+pub const DB_CVS_COLS: &str = "cv_id int, name_jp text primary key, name_en text";
+
+pub const DB_LKP_WORK_CVS_NAME: &str = "lkp_work_cvs";
+pub const DB_LKP_WORK_CVS_COLS: &str = "fld_id int, cv_id int";

@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::dlsite::types::DlSiteProductIdResult;
 
 #[derive(Debug)]
@@ -21,6 +23,17 @@ impl AgeCategory {
 impl Default for AgeCategory {
     fn default() -> Self {
         Self::R18
+    }
+}
+
+impl Display for AgeCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgeCategory::Other => write!(f, "Other"),
+            AgeCategory::AllAge => write!(f, "All Ages"),
+            AgeCategory::R15 => write!(f, "R15"),
+            AgeCategory::R18 => write!(f, "R18"),
+        }
     }
 }
 

@@ -1,9 +1,30 @@
 use reqwest::Url;
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
 
 #[derive(Debug)]
 pub struct DlSiteProductScrapResult {
-    pub genre: Vec<String>
+    pub genre: Vec<String>,
+    pub cvs: Vec<String>
+}
+
+fn extract_td_after_th(html: &str, th_text: &str) -> Option<String> {
+    let document = Html::parse_document(html);
+    
+    let th_selector = Selector::parse("th").unwrap();
+    let td_selector = Selector::parse("td").unwrap();
+    
+    for th_element in document.select(&th_selector) {
+        if th_element.text().collect::<Vec<_>>().join("").trim() == th_text {
+            if let Some(parent_node) = th_element.parent() {
+                if let Some(parent_element) = ElementRef::wrap(parent_node) {
+                    if let Some(td) = parent_element.select(&td_selector).next() {
+                        return Some(td.text().collect::<Vec<_>>().join("").trim().to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 impl DlSiteProductScrapResult {
@@ -29,11 +50,16 @@ impl DlSiteProductScrapResult {
                 genre.push(c.to_string());
             }
 
-            DlSiteProductScrapResult {
-                genre
-            }
-        } else {
-            todo!();
+        }
+
+        let mut cvs = vec![];
+        if let Some(elem) = extract_td_after_th(&html, "Voice Actor") {
+            cvs = elem.split("/").map(|x| x.to_string()).collect();
+        }
+
+        DlSiteProductScrapResult {
+            genre,
+            cvs
         }
     }
 }
