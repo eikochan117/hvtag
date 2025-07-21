@@ -1,10 +1,13 @@
 use std::{error::Error, fmt::Display};
 
+use crate::folders::types::RJCode;
+
 #[derive(Debug)]
 pub enum HvtError {
     GenericError(Box<dyn Error>),
     FolderReadingError(String),
     SqliteError(rusqlite::Error),
+    RemovedWork(RJCode),
 }
 
 impl From<rusqlite::Error> for HvtError {
@@ -21,6 +24,7 @@ impl Display for HvtError {
             HvtError::GenericError(x) => write!(f, "Generic Error : {x}"),
             HvtError::FolderReadingError(x) => write!(f, "Error reading folder : {x}"),
             HvtError::SqliteError(x) => write!(f, "Error SQLite : {x}"),
+            HvtError::RemovedWork(x) => write!(f, "Removed work : {x}"),
         }
     }
 }

@@ -47,14 +47,14 @@ impl DlSiteProductScrapResult {
         if let Some(elem) = document.select(&selector).next() {
             let content = elem.text().filter(|x| !x.contains("\n")).collect::<Vec<_>>();
             for c in content {
-                genre.push(c.to_string());
+                genre.push(c.replace("'", "''").to_string());
             }
 
         }
 
         let mut cvs = vec![];
         if let Some(elem) = extract_td_after_th(&html, "Voice Actor") {
-            cvs = elem.split(" / ").map(|x| x.to_string()).collect();
+            cvs = elem.split(" / ").map(|x| x.trim().to_string()).collect();
         }
 
         if cvs.is_empty() {

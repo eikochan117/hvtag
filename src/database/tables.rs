@@ -33,3 +33,6 @@ pub const DB_CVS_COLS: &str = "cv_id int, name_jp text primary key, name_en text
 
 pub const DB_LKP_WORK_CVS_NAME: &str = "lkp_work_cvs";
 pub const DB_LKP_WORK_CVS_COLS: &str = "fld_id int, cv_id int";
+
+pub const DB_DLSITE_ERRORS_NAME: &str = "dlsite_errors";
+pub const DB_DLSITE_ERRORS_COLS: &str = "fld_id int, error_type text";

@@ -44,8 +44,22 @@ pub fn get_unscanned_works() -> String {
         left join
             {DB_DLSITE_SCAN_NAME} t2
         using(fld_id)
+        left join
+            {DB_DLSITE_ERRORS_NAME} t3
+        using(fld_id)
         where
-            t2.last_scan is null")
+            t2.last_scan is null
+            and t3.error_type is null")
+}
+
+pub fn insert_error(work: RJCode, error: &str) -> String {
+    format!(
+        "insert into {DB_DLSITE_ERRORS_NAME}
+        select
+            t1.fld_id,
+            '{error}' as error_type
+        from {DB_FOLDERS_NAME} t1
+        where t1.rjcode = '{work}'")
 }
 
 pub fn insert_tag(tag: &str, tag_id: usize) -> String {
@@ -93,7 +107,6 @@ pub fn remove_previous_data_of_work(table: &str, work: RJCode) -> String {
         where 
             fld_id in
                 (select fld_id from cte)");
-    println!("{sql}");
     sql
 }
 

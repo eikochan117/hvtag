@@ -10,6 +10,10 @@ pub async fn  assign_data_to_work(conn: &Connection, work: RJCode) -> Result<(),
     let wd = WorkDetails::build_from_rjcode(work.clone()).await
         .map_err(|x| HvtError::GenericError(x))?;
     let sr = DlSiteProductScrapResult::build_from_rjcode(work.clone()).await;
+
+    if sr.genre.is_empty() {
+        return Err(HvtError::RemovedWork(work));
+    }
     
     // TAGS
     println!("assign tags: {:?}", &sr.genre);
