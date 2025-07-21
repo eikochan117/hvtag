@@ -16,7 +16,7 @@ pub fn init_table(name: &str, cols: &str) -> String {
 pub fn get_max_id(id_fld: &str, table: &str) -> String {
     format!(
         "select 
-            max({id_fld}) 
+            coalesce(max({id_fld}), 1) 
         from 
             {table}")
 }
@@ -79,7 +79,7 @@ pub fn insert_cv(jp_name: &str, en_name: &str, cv_id: usize) -> String {
 }
 
 pub fn remove_previous_data_of_work(table: &str, work: RJCode) -> String {
-    format!(
+    let sql = format!(
         "with
         cte as (
             select 
@@ -92,7 +92,9 @@ pub fn remove_previous_data_of_work(table: &str, work: RJCode) -> String {
         delete from {table}
         where 
             fld_id in
-                (select fld_id from cte)")
+                (select fld_id from cte)");
+    println!("{sql}");
+    sql
 }
 
 pub fn assign_release_date_to_work(work: RJCode, date: &str) -> String {
@@ -144,7 +146,7 @@ pub fn assign_tags_to_work(work: RJCode, tags: &Vec<String>) -> String {
 
 pub fn assign_rating_to_work(work: RJCode, rating: &str) -> String {
     format!(
-        "insert into {DB_RATING_COLS}
+        "insert into {DB_RATING_NAME}
         select
             t1.fld_id,
             '{rating}' as rating
@@ -184,4 +186,14 @@ pub fn assign_cvs_to_work(work: RJCode, cvs: &Vec<String>) -> String {
             t1.rjcode = '{work}'
             and t2.name_jp in 
             (select val from cte)")
+}
+
+pub fn set_work_scan_date(work: RJCode) -> String {
+    format!(
+    "insert or replace into {DB_DLSITE_SCAN_NAME}
+    select 
+        t1.fld_id,
+        datetime() as last_scan
+    from {DB_FOLDERS_NAME} t1
+        where rjcode = '{work}'")
 }

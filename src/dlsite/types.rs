@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::{Value};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RankEntry {
@@ -14,8 +15,8 @@ pub struct ReviewEntry {
     pub count: u32,
     pub ratio: u32
 }
-#[derive(Serialize, Deserialize, Debug)]
 
+#[derive(Serialize, Deserialize, Debug)]
 pub struct TranslationInfoEntry {
     pub is_translation_agree: bool,
     pub is_volunteer: bool,
@@ -28,7 +29,9 @@ pub struct TranslationInfoEntry {
     pub child_worknos: Vec<String>,
     pub lang: Option<String>,
     pub production_trade_price_rate: u32,
-    pub translation_bonus_langs: Vec<String>
+    //pub translation_bonus_langs: Vec<String>
+    #[serde(flatten)]
+    pub extra: Option<Value>
 }
 #[derive(Serialize, Deserialize, Debug)]
 #[allow(non_snake_case)]
@@ -144,11 +147,11 @@ pub struct DlSiteProductIdResult {
     pub upgrade_min_price: u32,
     pub down_url: String,
     pub is_target: Option<bool>,
-    pub title_id: String,
-    pub title_name: String,
-    pub title_name_masked: String,
+    pub title_id: Option<String>,
+    pub title_name: Option<String>,
+    pub title_name_masked: Option<String>,
     pub title_volumn: Option<u32>,
-    pub title_work_count: u32,
+    pub title_work_count: Option<u32>,
     pub is_title_completed: bool,
     pub bulkbuy_key: Option<String>,
     pub bonuses: Vec<String>,
@@ -183,6 +186,7 @@ pub struct DlSiteProductIdResult {
     pub options: String,
     pub custom_genres: Vec<String>,
     pub dl_count_total: u32,
+    #[serde(skip_serializing)]
     pub dl_count_items: Vec<DlCountItemEntry>,
     pub default_point_str: String
 }

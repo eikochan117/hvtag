@@ -54,7 +54,11 @@ impl DlSiteProductScrapResult {
 
         let mut cvs = vec![];
         if let Some(elem) = extract_td_after_th(&html, "Voice Actor") {
-            cvs = elem.split("/").map(|x| x.to_string()).collect();
+            cvs = elem.split(" / ").map(|x| x.to_string()).collect();
+        }
+
+        if cvs.is_empty() {
+            cvs.push(String::from("<unknown>"));
         }
 
         DlSiteProductScrapResult {
