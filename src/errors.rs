@@ -1,78 +1,48 @@
-use std::{error::Error, fmt::Display};
-
 use crate::folders::types::RJCode;
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum HvtError {
-    GenericError(Box<dyn Error>),
-    FolderReadingError(String),
-    SqliteError(rusqlite::Error),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("HTTP error: {0}")]
+    Http(String),
+
+    #[error("Database error: {0}")]
+    Database(#[from] rusqlite::Error),
+
+    #[error("Parse error: {0}")]
+    Parse(String),
+
+    #[error("Work {0} removed from DLSite")]
     RemovedWork(RJCode),
-}
 
-impl From<rusqlite::Error> for HvtError {
-    fn from(value: rusqlite::Error) -> Self {
-        Self::SqliteError(value)
-    }
-}
+    #[error("Folder reading error: {0}")]
+    FolderReading(String),
 
-impl Error for HvtError {}
-
-impl Display for HvtError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            HvtError::GenericError(x) => write!(f, "Generic Error : {x}"),
-            HvtError::FolderReadingError(x) => write!(f, "Error reading folder : {x}"),
-            HvtError::SqliteError(x) => write!(f, "Error SQLite : {x}"),
-            HvtError::RemovedWork(x) => write!(f, "Removed work : {x}"),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum DbLoaderError {
+    #[error("Operating System not supported: {0}")]
     UnsupportedOS(String),
+
+    #[error("Path creation failed: {0}")]
     PathCreationFailed(String),
+
+    #[error("Environment variable unavailable: {0}")]
     UnavailableEnvVariable(String),
-    SqliteError(rusqlite::Error)
+
+    #[error("Audio tagging error: {0}")]
+    AudioTag(String),
+
+    #[error("Audio conversion error: {0}")]
+    AudioConversion(String),
+
+    #[error("Image processing error: {0}")]
+    Image(String),
+
+    #[error("Generic error: {0}")]
+    Generic(String),
 }
 
-impl From<rusqlite::Error> for DbLoaderError {
-    fn from(value: rusqlite::Error) -> Self {
-        Self::SqliteError(value)
-    }
-}
-
-impl Error for DbLoaderError {}
-
-impl Display for DbLoaderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DbLoaderError::UnsupportedOS(x) => write!(f, "Operating System is not supported : {x}"),
-            DbLoaderError::PathCreationFailed(x) => write!(f, "Could not create path : {x}"),
-            DbLoaderError::UnavailableEnvVariable(x) => write!(f, "Could not get env value : {x}"),
-            DbLoaderError::SqliteError(x) => write!(f, "SQLite error : {x}")
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum DatabaseError {
-    SqliteError(rusqlite::Error)
-}
-
-impl From<rusqlite::Error> for DatabaseError {
-    fn from(value: rusqlite::Error) -> Self {
-        Self::SqliteError(value)
-    }
-}
-
-impl Error for DatabaseError { }
-
-impl Display for DatabaseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DatabaseError::SqliteError(x) => write!(f, "SQLite error : {x}")
-        }
-    }
-}
+// Legacy type aliases for backwards compatibility during migration
+pub type DbLoaderError = HvtError;
+pub type DatabaseError = HvtError;

@@ -40,7 +40,7 @@ impl Display for AgeCategory {
 #[derive(Default, Debug)]
 pub struct WorkDetails {
     pub rjcode: String,
-    pub maker_code: String,
+    pub maker_code: crate::folders::types::RGCode,
     pub age_category: AgeCategory,
     pub rate: f32,
     pub name: String,
@@ -52,7 +52,7 @@ impl WorkDetails {
     pub fn from_dlsite_product_id_result(rjcode: &str, p: DlSiteProductIdResult) -> Self {
         WorkDetails {
             rjcode: rjcode.to_string(),
-            maker_code: p.maker_id,
+            maker_code: crate::folders::types::RGCode::new(p.maker_id),
             age_category: AgeCategory::from_int(p.age_category),
             rate: p.rate_average_2dp,
             name: p.work_name,
@@ -72,4 +72,58 @@ pub struct Work {
     release_date: String,
     seiyuu: Vec<String>,
     tags: Vec<String>,
+}
+
+// Audio tagging types for Step 3
+
+#[derive(Debug, Clone)]
+pub struct AudioMetadata {
+    pub title: String,              // work name
+    pub artists: Vec<String>,       // voice actors (CVs) - can be multiple
+    pub album: String,              // work name
+    pub album_artist: String,       // circle name
+    pub track_number: Option<u32>,  // parsed from filename
+    pub genre: Vec<String>,         // dlsite tags
+    pub date: Option<String>,       // release_date
+    // Note: Cover art is NOT in AudioMetadata - it's saved separately as folder.jpeg
+}
+
+#[derive(Debug, Clone)]
+pub struct TaggerConfig {
+    pub convert_to_mp3: bool,
+    pub target_bitrate: u32,
+    pub download_cover: bool,
+    pub cover_size: (u32, u32),
+}
+
+impl Default for TaggerConfig {
+    fn default() -> Self {
+        TaggerConfig {
+            convert_to_mp3: false,
+            target_bitrate: 320,
+            download_cover: true,
+            cover_size: (300, 300),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum AudioFormat {
+    Mp3,
+    Flac,
+    Wav,
+    Ogg,
+    Unknown,
+}
+
+impl AudioFormat {
+    pub fn from_extension(ext: &str) -> Self {
+        match ext.to_lowercase().as_str() {
+            "mp3" => AudioFormat::Mp3,
+            "flac" => AudioFormat::Flac,
+            "wav" => AudioFormat::Wav,
+            "ogg" => AudioFormat::Ogg,
+            _ => AudioFormat::Unknown,
+        }
+    }
 }

@@ -5,13 +5,26 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.5.23", features = ["derive"] }
-reqwest = { version = "0.12.9", features = ["json", "cookies"] }
+reqwest = { version = "0.12.9", features = ["json", "cookies", "socks"] }
 tokio = { version = "1", features = ["full"] }
 scraper = "0.22.0"
 serde = { version = "1.0.216", features = ["derive"] }
 serde_json = "1.0.134"
 serde_yaml = "0.9.34"
+toml = "0.8"
 rusqlite = "0.37.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Audio tagging and processing
+id3 = "1.14"
+metaflac = "0.2"
+image = "0.25"
+regex = "1.0"
+dialoguer = "0.11"
 
 [build]
 jobs = 2
