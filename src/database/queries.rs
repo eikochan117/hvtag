@@ -52,6 +52,19 @@ pub fn insert_tag(
     Ok(rows)
 }
 
+/// Check if a circle already exists in the database
+pub fn circle_exists(
+    conn: &Connection,
+    circle: &RGCode,
+) -> Result<bool, HvtError> {
+    let count: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM {DB_CIRCLE_NAME} WHERE rgcode = ?1"),
+        params![circle],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
 /// Insert a circle
 pub fn insert_circle(
     conn: &Connection,
@@ -412,4 +425,21 @@ pub fn save_track_parsing_preference(
     )?;
 
     Ok(())
+}
+
+/// Update folder path for a work in database
+pub fn update_folder_path(
+    conn: &Connection,
+    rjcode: &RJCode,
+    new_path: &str,
+) -> Result<usize, HvtError> {
+    let rows = conn.execute(
+        &format!(
+            "UPDATE {DB_FOLDERS_NAME}
+             SET path = ?1
+             WHERE rjcode = ?2"
+        ),
+        params![new_path, rjcode],
+    )?;
+    Ok(rows)
 }

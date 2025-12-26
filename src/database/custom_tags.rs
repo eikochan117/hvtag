@@ -173,10 +173,14 @@ pub fn get_merged_tags_for_work(
         )
     )?;
 
-    let tags: Vec<String> = stmt
+    let mut tags: Vec<String> = stmt
         .query_map(params![work.as_str()], |row| row.get(0))?
         .filter_map(|r| r.ok())
         .collect();
+
+    // Deduplicate tags in case multiple DLSite tags are renamed to the same custom name
+    tags.sort();
+    tags.dedup();
 
     Ok(tags)
 }

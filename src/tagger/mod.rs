@@ -280,10 +280,23 @@ async fn tag_all_files(
 
     // STEP 5: Process each file with the preference
     for (file_path, filename) in audio_files {
-        let track_number = track_parser::parse_track_number_with_preference(
-            &filename,
-            current_pref.as_ref(),
-        );
+        // Check if file already has a track number in its tags
+        let existing_track = if let Ok(Some(existing_metadata)) = id3_handler::read_id3_tags(&file_path) {
+            existing_metadata.track_number
+        } else {
+            None
+        };
+
+        // If file already has a track number, keep it. Otherwise parse from filename
+        let track_number = if let Some(existing) = existing_track {
+            debug!("File {} already has track number: {}, keeping it", filename, existing);
+            Some(existing)
+        } else {
+            track_parser::parse_track_number_with_preference(
+                &filename,
+                current_pref.as_ref(),
+            )
+        };
 
         let mut file_metadata = base_metadata.clone();
         file_metadata.track_number = track_number;

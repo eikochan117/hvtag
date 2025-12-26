@@ -73,7 +73,7 @@ impl DlSiteProductScrapResult {
 
         let resp = http_client
             .get(url)
-            .header("Cookie", "locale=jp_JP")
+            .header("Cookie", "locale=en_US")
             .header("Accept-Language", "en-US")
             .send()
             .await
@@ -94,13 +94,13 @@ impl DlSiteProductScrapResult {
             }
         }
 
-        // Extract CVs - Try Japanese FIRST, then English
+        // Extract CVs - Try English FIRST (since we're using en_US locale), then Japanese as fallback
         let mut cvs = vec![];
-        if let Some(elem) = extract_td_after_th(&html, "声優")? {
+        if let Some(elem) = extract_td_after_th(&html, "Voice Actor")? {
             cvs = elem.split(" / ").map(|x| x.trim().to_string()).collect();
         }
         if cvs.is_empty() {
-            if let Some(elem) = extract_td_after_th(&html, "Voice Actor")? {
+            if let Some(elem) = extract_td_after_th(&html, "声優")? {
                 cvs = elem.split(" / ").map(|x| x.trim().to_string()).collect();
             }
         }
@@ -109,11 +109,12 @@ impl DlSiteProductScrapResult {
         }
 
         // Extract BOTH circle names (EN and JP)
+        // Since we're using en_US locale, try English first
         let circle_name_en = extract_td_after_th(&html, "Circle")?.map(|s| s.trim().to_string());
         let circle_name_jp = extract_td_after_th(&html, "サークル名")?.map(|s| s.trim().to_string());
 
-        // For backward compatibility, set circle_name to JP if available, else EN
-        let circle_name = circle_name_jp.clone().or(circle_name_en.clone());
+        // For backward compatibility, set circle_name to EN if available, else JP (since we're in EN locale)
+        let circle_name = circle_name_en.clone().or(circle_name_jp.clone());
 
         Ok(DlSiteProductScrapResult {
             genre,

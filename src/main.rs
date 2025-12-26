@@ -1,6 +1,7 @@
 
 use clap::Parser;
 use tracing::{info, warn, error, debug};
+use indicatif::{ProgressBar, ProgressStyle, ProgressDrawTarget};
 
 use std::path::Path;
 use crate::{
@@ -106,6 +107,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load configuration
     let app_config = Config::load()?;
+
+    // ========== PRE-VPN PHASE: Local filesystem operations ==========
+    // Do all local scanning BEFORE connecting VPN to avoid losing access to network shares
+
+    if args.input.is_some() || args.rjcode.is_some() {
+        step1_scan(&db, &args)?;
+    }
+
+    // Pre-scan for images: identify which covers are missing BEFORE VPN connects
+    let works_needing_covers = if args.image || args.full {
+        info!("Pre-scanning for missing covers...");
+        identify_works_needing_covers(&db)?
+    } else {
+        Vec::new()
+    };
+
+    // ========== VPN PHASE: Connect if needed ==========
     let mut vpn_manager: Option<WireGuardManager> = None;
     let mut was_vpn_already_connected = false;
 
@@ -145,32 +163,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         .build()?;
 
-    // Determine workflow mode
+    // ========== WORKFLOW EXECUTION (with VPN active if needed) ==========
     let result = if args.full {
-        // Full workflow: scan -> fetch metadata -> tag
-        run_full_workflow(&db, &args, &http_client, &app_config).await
+        // Full workflow: fetch metadata -> download images
+        run_full_workflow(&db, &args, &http_client, &app_config, &works_needing_covers).await
     } else {
-        // Individual steps
-        if args.input.is_some() || args.rjcode.is_some() {
-            step1_scan(&db, &args)?;
-        }
-
+        // Individual steps (VPN-dependent operations only)
         if args.collect {
             step2_fetch_metadata(&db, &args, &http_client).await?;
         }
 
-        if args.image {
-            step2_download_images(&db).await?;
-        }
-
-        if args.tag || args.apply || args.convert {
-            step3_tag_files(&db, &args, &app_config).await?;
+        if args.image && !works_needing_covers.is_empty() {
+            step2_download_images_filtered(&db, &works_needing_covers).await?;
         }
         Ok(())
     };
 
-    // Disconnect VPN before exiting (even on error)
-    // Only disconnect if we connected it ourselves (it wasn't already connected)
+    // Disconnect VPN before post-VPN operations
     if let Some(mut manager) = vpn_manager {
         if !was_vpn_already_connected {
             info!("Disconnecting VPN (was not connected initially)...");
@@ -180,7 +189,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    result
+    // Return early on error before post-VPN phase
+    result?;
+
+    // ========== POST-VPN PHASE: Local filesystem operations ==========
+    // Copy cached covers and tag files AFTER VPN is disconnected to ensure network share access
+
+    // Copy covers from cache to their final destinations
+    if (args.image || args.full) && !works_needing_covers.is_empty() {
+        step_copy_cached_covers(&works_needing_covers)?;
+    }
+
+    if args.tag || args.apply || args.convert || args.full {
+        step3_tag_files(&db, &args, &app_config).await?;
+    }
+
+    // Move files if requested
+    if let Some(ref destination) = args.r#move {
+        step_move_files(&db, &args, destination)?;
+    }
+
+    Ok(())
+}
+
+/// Helper function to create a progress bar that keeps finished items visible
+fn create_progress_bar(len: u64) -> ProgressBar {
+    let pb = ProgressBar::new(len);
+    pb.set_draw_target(ProgressDrawTarget::stdout());
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("=>-")
+    );
+    pb
 }
 
 /// Step 1: Scan directories for audio works
@@ -240,88 +282,178 @@ async fn step2_fetch_metadata(
 
     info!("Processing {} work(s)", works.len());
 
-    for work in works {
-        info!("Fetching metadata for {}...", work);
+    // Create progress bar
+    let pb = create_progress_bar(works.len() as u64);
 
-        match assign_data_to_work_with_client(db, work.clone(), data_selection.clone(), Some(http_client)).await {
-            Ok(_) => info!("{} ... metadata fetched successfully", work),
+    for work in works {
+        pb.set_message(format!("Fetching {}", work));
+
+        let result_msg = match assign_data_to_work_with_client(db, work.clone(), data_selection.clone(), Some(http_client)).await {
+            Ok(_) => {
+                format!("{} ✓", work)
+            }
             Err(errors::HvtError::RemovedWork(rjcode)) => {
-                warn!("{} ... is removed from DLSite!", work);
                 if let Err(e) = queries::insert_error(db, &rjcode, "removed work", Some("dlsite_removed")) {
                     warn!("Failed to log error for {}: {}", work, e);
                 }
+                format!("{} (removed)", work)
             }
             Err(e) => {
                 error!("Error fetching metadata for {}: {}", work, e);
                 if let Err(err) = queries::insert_error(db, &work, &e.to_string(), Some("fetch_error")) {
                     warn!("Failed to log error for {}: {}", work, err);
                 }
+                format!("{} ✗", work)
             }
-        }
+        };
+
+        pb.println(&result_msg);
+        pb.inc(1);
     }
+
+    pb.finish_and_clear();
 
     Ok(())
 }
 
-/// Step 2b: Download cover images from database links to work folders
-async fn step2_download_images(
+/// Pre-scan phase: Identify works that need covers BEFORE VPN connects
+/// This allows checking local/network filesystems before they become unavailable
+fn identify_works_needing_covers(
     db: &rusqlite::Connection,
-) -> Result<(), Box<dyn std::error::Error>> {
-    info!("=== DOWNLOADING COVER IMAGES ===");
-
+) -> Result<Vec<(RJCode, String, String)>, Box<dyn std::error::Error>> {
     // Get all works with cover links
     let works_with_covers = queries::get_all_works_with_cover_links(db)?;
 
     if works_with_covers.is_empty() {
         info!("No works with cover links found in database");
-        info!("Run --collect --image first to fetch cover links from DLSite");
-        return Ok(());
+        return Ok(Vec::new());
     }
 
-    info!("Found {} work(s) with cover links", works_with_covers.len());
-
-    let mut downloaded = 0;
-    let mut skipped = 0;
-    let mut failed = 0;
+    let mut works_needing_covers = Vec::new();
 
     for (work, folder_path, cover_url) in works_with_covers {
         let folder_path_obj = Path::new(&folder_path);
 
         // Skip if folder doesn't exist
         if !folder_path_obj.exists() {
-            warn!("Folder not found: {} ({})", work, folder_path);
-            failed += 1;
+            debug!("Folder not found: {} ({})", work, folder_path);
             continue;
         }
 
         // Skip if cover already exists
         if cover_art::has_cover_art(folder_path_obj) {
             debug!("Cover already exists: {} ({})", work, folder_path);
-            skipped += 1;
             continue;
         }
 
-        info!("Downloading cover for {}...", work);
-        match cover_art::download_and_save_cover(
-            &cover_url,
-            folder_path_obj,
-            None,  // Keep original dimensions from DLSite
-        ).await {
-            Ok(_) => {
-                info!("  {} ... cover downloaded", work);
-                downloaded += 1;
-            }
-            Err(e) => {
-                warn!("  {} ... failed to download cover: {}", work, e);
-                failed += 1;
-            }
-        }
+        // This work needs a cover
+        works_needing_covers.push((work, folder_path, cover_url));
     }
 
-    info!("\n=== COVER DOWNLOAD SUMMARY ===");
-    info!("Downloaded: {}", downloaded);
-    info!("Skipped (already exist): {}", skipped);
-    info!("Failed: {}", failed);
+    if !works_needing_covers.is_empty() {
+        info!("Found {} work(s) needing covers", works_needing_covers.len());
+    }
+
+    Ok(works_needing_covers)
+}
+
+/// Step 2b: Download cover images to local cache (VPN phase)
+async fn step2_download_images_filtered(
+    db: &rusqlite::Connection,
+    works_to_download: &[(RJCode, String, String)],
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!("=== DOWNLOADING COVER IMAGES TO CACHE ===");
+
+    if works_to_download.is_empty() {
+        info!("No covers to download (all works already have covers)");
+        return Ok(());
+    }
+
+    info!("Downloading {} cover(s) to local cache...", works_to_download.len());
+
+    // Create progress bar
+    let pb = create_progress_bar(works_to_download.len() as u64);
+
+    let mut downloaded = 0;
+    let mut failed = 0;
+
+    for (work, _folder_path, cover_url) in works_to_download {
+        pb.set_message(format!("Downloading {}", work));
+
+        let result_msg = match cover_art::download_cover_to_cache(
+            cover_url,
+            work.as_str(),
+            None,  // Keep original dimensions from DLSite
+        ).await {
+            Ok(_cache_path) => {
+                downloaded += 1;
+                format!("{} ✓", work)
+            }
+            Err(e) => {
+                warn!("Failed to download cover for {}: {}", work, e);
+                failed += 1;
+                format!("{} ✗", work)
+            }
+        };
+
+        pb.println(&result_msg);
+        pb.inc(1);
+    }
+
+    pb.finish_and_clear();
+    info!("Covers cached: {} | Failed: {}", downloaded, failed);
+
+    Ok(())
+}
+
+/// Post-VPN: Copy cached covers to their final folder destinations
+fn step_copy_cached_covers(
+    works_with_covers: &[(RJCode, String, String)],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if works_with_covers.is_empty() {
+        return Ok(());
+    }
+
+    info!("\n=== COPYING CACHED COVERS TO FOLDERS ===");
+    info!("Copying {} cover(s) from cache...", works_with_covers.len());
+
+    // Create progress bar
+    let pb = create_progress_bar(works_with_covers.len() as u64);
+
+    let mut copied = 0;
+    let mut failed = 0;
+
+    for (work, folder_path, _cover_url) in works_with_covers {
+        pb.set_message(format!("Copying {}", work));
+        let folder_path_obj = Path::new(folder_path);
+
+        // Skip if folder doesn't exist
+        if !folder_path_obj.exists() {
+            debug!("Folder not found, skipping: {}", folder_path);
+            pb.println(&format!("{} (folder not found)", work));
+            failed += 1;
+            pb.inc(1);
+            continue;
+        }
+
+        let result_msg = match cover_art::copy_cover_from_cache(work.as_str(), folder_path_obj) {
+            Ok(_) => {
+                copied += 1;
+                format!("{} ✓", work)
+            }
+            Err(e) => {
+                warn!("Failed to copy cover for {}: {}", work, e);
+                failed += 1;
+                format!("{} ✗", work)
+            }
+        };
+
+        pb.println(&result_msg);
+        pb.inc(1);
+    }
+
+    pb.finish_and_clear();
+    info!("Covers copied: {} | Failed: {}", copied, failed);
 
     Ok(())
 }
@@ -358,35 +490,146 @@ async fn step3_tag_files(
 
     info!("Processing {} work(s)", works_with_paths.len());
 
+    // Create progress bar
+    let pb = create_progress_bar(works_with_paths.len() as u64);
+
     for (work, folder_path) in works_with_paths {
+        pb.set_message(format!("Tagging {}", work));
+
         if !std::path::Path::new(&folder_path).exists() {
             warn!("Folder not found: {}", folder_path);
+            pb.println(&format!("{} (folder not found)", work));
+            pb.inc(1);
             continue;
         }
 
         let folder = ManagedFolder::new(folder_path.clone());
-        info!("Tagging files in {}...", folder_path);
 
-        match process_work_folder(db, &folder, &tagger_config).await {
-            Ok(_) => info!("{} ... tagged successfully", work),
-            Err(e) => warn!("Failed to tag {}: {}", work, e),
-        }
+        let result_msg = match process_work_folder(db, &folder, &tagger_config).await {
+            Ok(_) => {
+                format!("{} ✓", work)
+            }
+            Err(e) => {
+                warn!("Failed to tag {}: {}", work, e);
+                format!("{} ✗", work)
+            }
+        };
+
+        pb.println(&result_msg);
+        pb.inc(1);
     }
+
+    pb.finish_and_clear();
+    info!("Tagging completed");
 
     Ok(())
 }
 
-/// Full workflow: scan -> fetch metadata -> tag
+/// Move tagged files to destination directory
+fn step_move_files(
+    db: &rusqlite::Connection,
+    args: &PrgmArgs,
+    destination: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!("\n=== MOVING FILES TO DESTINATION ===");
+    info!("Destination: {}", destination);
+
+    // Create destination directory if it doesn't exist
+    let dest_path = Path::new(destination);
+    if !dest_path.exists() {
+        std::fs::create_dir_all(dest_path)?;
+        info!("Created destination directory: {}", destination);
+    }
+
+    // Get works to move
+    let works_with_paths: Vec<(RJCode, String)> = if let Some(ref input) = args.input {
+        // If --input is specified, only move works from that directory
+        let folders = get_list_of_folders(input)?;
+        folders.into_iter()
+            .map(|f| (f.rjcode.clone(), f.path.clone()))
+            .collect()
+    } else if let Some(ref rjcode) = args.rjcode {
+        // If --rjcode is specified, move only that specific work
+        let path = std::env::current_dir()?.to_string_lossy().to_string();
+        vec![(RJCode::new(rjcode.clone())?, path)]
+    } else {
+        // Move all works from database
+        queries::get_all_works_with_paths(db)?
+    };
+
+    if works_with_paths.is_empty() {
+        info!("No works to move");
+        return Ok(());
+    }
+
+    info!("Moving {} work(s)...", works_with_paths.len());
+
+    let pb = create_progress_bar(works_with_paths.len() as u64);
+
+    let mut moved = 0;
+    let mut failed = 0;
+
+    for (work, old_path) in works_with_paths {
+        pb.set_message(format!("Moving {}", work));
+
+        let old_path_obj = Path::new(&old_path);
+
+        if !old_path_obj.exists() {
+            warn!("Source folder not found: {}", old_path);
+            pb.println(&format!("{} (source not found)", work));
+            failed += 1;
+            pb.inc(1);
+            continue;
+        }
+
+        // New path: destination/folder_name
+        let folder_name = old_path_obj.file_name()
+            .ok_or_else(|| format!("Invalid folder path: {}", old_path))?;
+        let new_path = dest_path.join(folder_name);
+
+        // Move the folder
+        match std::fs::rename(old_path_obj, &new_path) {
+            Ok(_) => {
+                // Update path in database
+                let new_path_str = new_path.to_string_lossy().to_string();
+                match queries::update_folder_path(db, &work, &new_path_str) {
+                    Ok(_) => {
+                        pb.println(&format!("{} ✓", work));
+                        moved += 1;
+                    }
+                    Err(e) => {
+                        warn!("Moved folder but failed to update DB for {}: {}", work, e);
+                        pb.println(&format!("{} ⚠ (DB update failed)", work));
+                        failed += 1;
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Failed to move {}: {}", work, e);
+                pb.println(&format!("{} ✗", work));
+                failed += 1;
+            }
+        }
+
+        pb.inc(1);
+    }
+
+    pb.finish_and_clear();
+    info!("Moved: {} | Failed: {}", moved, failed);
+
+    Ok(())
+}
+
+/// Full workflow: fetch metadata -> download covers
+/// Note: Scanning and tagging are done outside this function to manage VPN connection properly
 async fn run_full_workflow(
     db: &rusqlite::Connection,
     args: &PrgmArgs,
     http_client: &reqwest::Client,
     app_config: &Config,
+    works_needing_covers: &[(RJCode, String, String)],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!("=== RUNNING FULL WORKFLOW ===\n");
-
-    // Step 1: Scan
-    step1_scan(db, args)?;
+    info!("=== RUNNING FULL WORKFLOW (VPN PHASE) ===\n");
 
     // Step 2: Fetch metadata for newly scanned works
     let unscanned_works = get_list_of_unscanned_works(db, None)?;
@@ -408,47 +651,40 @@ async fn run_full_workflow(
         cover_link: true,
     };
 
+    // Create progress bar
+    let pb = create_progress_bar(unscanned_works.len() as u64);
+
     for work in &unscanned_works {
-        info!("Fetching metadata for {}...", work);
-        match assign_data_to_work_with_client(db, work.clone(), data_selection.clone(), Some(http_client)).await {
-            Ok(_) => info!("{} ... metadata fetched", work),
+        pb.set_message(format!("Fetching {}", work));
+
+        let result_msg = match assign_data_to_work_with_client(db, work.clone(), data_selection.clone(), Some(http_client)).await {
+            Ok(_) => {
+                format!("{} ✓", work)
+            }
             Err(errors::HvtError::RemovedWork(rjcode)) => {
-                warn!("{} ... is removed from DLSite!", work);
                 queries::insert_error(db, &rjcode, "removed work", Some("dlsite_removed"))?;
+                format!("{} (removed)", work)
             }
             Err(e) => {
                 error!("Error processing {}: {}", work, e);
                 queries::insert_error(db, work, &e.to_string(), Some("fetch_error"))?;
+                format!("{} ✗", work)
             }
-        }
+        };
+
+        pb.println(&result_msg);
+        pb.inc(1);
     }
 
-    // Step 3: Tag files
-    let tagger_config = TaggerConfig {
-        convert_to_mp3: args.convert,
-        target_bitrate: 320,
-        download_cover: true,  // Always download covers in full mode
-        tag_separator: app_config.tagger.get_separator(),
-    };
+    pb.finish_and_clear();
+    info!("Metadata fetch completed");
 
-    // Get the newly scanned works with their paths from DB
-    let works_with_paths = queries::get_unscanned_works_with_paths(db)?;
-
-    for (work, folder_path) in works_with_paths {
-        if !std::path::Path::new(&folder_path).exists() {
-            warn!("Folder not found: {}", folder_path);
-            continue;
-        }
-
-        let folder = ManagedFolder::new(folder_path.clone());
-        info!("Tagging files in {}...", folder_path);
-
-        match process_work_folder(db, &folder, &tagger_config).await {
-            Ok(_) => info!("{} ... tagged successfully", work),
-            Err(e) => warn!("Failed to tag {}: {}", work, e),
-        }
+    // Step 3: Download covers (using pre-filtered list from pre-VPN phase)
+    if !works_needing_covers.is_empty() {
+        step2_download_images_filtered(db, works_needing_covers).await?;
     }
 
-    info!("\n=== FULL WORKFLOW COMPLETED ===");
+    info!("\n=== VPN PHASE COMPLETED ===");
+    info!("Tagging will be performed after VPN disconnects...");
     Ok(())
 }

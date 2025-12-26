@@ -74,27 +74,36 @@ pub async fn assign_data_to_work_with_client(
     // CIRCLE
     if data_selection.circle {
         debug!("assign circle: {:?}", &wd.maker_code);
-        let max_cir_id = queries::get_max_id(conn, "cir_id", DB_CIRCLE_NAME)?;
 
-        // Scrape circle names from circle profile page title
-        let (circle_name_en, circle_name_jp) = match scrapper::scrape_circle_profile(
-            wd.maker_code.as_str(),
-            client,
-        ).await {
-            Ok((en, jp)) => (en, jp),
-            Err(e) => {
-                warn!("Failed to scrape circle profile for {}: {}. Using fallback.", wd.maker_code, e);
-                (String::new(), String::new())
-            }
-        };
+        // Check if circle already exists in database
+        let circle_exists = queries::circle_exists(conn, &wd.maker_code)?;
 
-        // Insert circle with BOTH names (EN, JP)
-        queries::insert_circle(conn, &wd.maker_code, &circle_name_en, &circle_name_jp, max_cir_id + 1)?;
+        if !circle_exists {
+            debug!("Circle {} not in database, scraping names...", &wd.maker_code);
+            let max_cir_id = queries::get_max_id(conn, "cir_id", DB_CIRCLE_NAME)?;
+
+            // Scrape circle names from circle profile page title
+            let (circle_name_en, circle_name_jp) = match scrapper::scrape_circle_profile(
+                wd.maker_code.as_str(),
+                client,
+            ).await {
+                Ok((en, jp)) => (en, jp),
+                Err(e) => {
+                    warn!("Failed to scrape circle profile for {}: {}. Using fallback.", wd.maker_code, e);
+                    (String::new(), String::new())
+                }
+            };
+
+            // Insert circle with BOTH names (EN, JP)
+            queries::insert_circle(conn, &wd.maker_code, &circle_name_en, &circle_name_jp, max_cir_id + 1)?;
+        } else {
+            debug!("Circle {} already in database, skipping scrape", &wd.maker_code);
+        }
 
         // Remove previous assignment before creating new one
         queries::remove_previous_data_of_work(conn, DB_LKP_WORK_CIRCLE_NAME, &work)?;
 
-        // FIX: Add missing assignment call
+        // Assign circle to work
         queries::assign_circle_to_work(conn, &work, &wd.maker_code)?;
     }
 
