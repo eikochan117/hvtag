@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use tracing::{debug, error, info, warn};
 use crate::errors::HvtError;
-use super::config::WireGuardConfig;
+use crate::config::WireGuardConfig;
 
 pub struct WireGuardManager {
     interface_name: String,
@@ -148,7 +148,7 @@ impl WireGuardManager {
     }
 
     /// Check if the WireGuard interface already exists
-    fn interface_exists(&self) -> Result<bool, HvtError> {
+    pub fn interface_exists(&self) -> Result<bool, HvtError> {
         if self.is_windows {
             // On Windows, check if tunnel service is running
             let output = Command::new("sc")

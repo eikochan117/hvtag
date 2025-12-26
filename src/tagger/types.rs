@@ -50,13 +50,20 @@ pub struct WorkDetails {
 
 impl WorkDetails {
     pub fn from_dlsite_product_id_result(rjcode: &str, p: DlSiteProductIdResult) -> Self {
+        // Fix protocol-relative URLs from DLSite (//img.dlsite.jp/... -> https://img.dlsite.jp/...)
+        let image_link = if p.work_image.starts_with("//") {
+            format!("https:{}", p.work_image)
+        } else {
+            p.work_image
+        };
+
         WorkDetails {
             rjcode: rjcode.to_string(),
             maker_code: crate::folders::types::RGCode::new(p.maker_id),
             age_category: AgeCategory::from_int(p.age_category),
             rate: p.rate_average_2dp,
             name: p.work_name,
-            image_link: p.work_image,
+            image_link,
             release_date: p.regist_date,
         }
     }
@@ -93,7 +100,7 @@ pub struct TaggerConfig {
     pub convert_to_mp3: bool,
     pub target_bitrate: u32,
     pub download_cover: bool,
-    pub cover_size: (u32, u32),
+    pub tag_separator: String,
 }
 
 impl Default for TaggerConfig {
@@ -101,8 +108,8 @@ impl Default for TaggerConfig {
         TaggerConfig {
             convert_to_mp3: false,
             target_bitrate: 320,
+            tag_separator: "; ".to_string(),
             download_cover: true,
-            cover_size: (300, 300),
         }
     }
 }

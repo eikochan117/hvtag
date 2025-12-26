@@ -1,5 +1,5 @@
 use std::path::Path;
-use tracing::debug;
+use tracing::{debug, error};
 use crate::errors::HvtError;
 use image::ImageFormat;
 
@@ -18,6 +18,7 @@ pub async fn download_and_save_cover(
     target_size: Option<(u32, u32)>,
 ) -> Result<(), HvtError> {
     // Download image from URL
+    error!("{url}");
     let response = reqwest::get(url)
         .await
         .map_err(|e| HvtError::Http(format!("Failed to download cover art: {}", e)))?;

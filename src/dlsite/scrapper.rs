@@ -73,7 +73,7 @@ impl DlSiteProductScrapResult {
 
         let resp = http_client
             .get(url)
-            .header("Cookie", "locale=en_US")
+            .header("Cookie", "locale=jp_JP")
             .header("Accept-Language", "en-US")
             .send()
             .await
@@ -123,4 +123,87 @@ impl DlSiteProductScrapResult {
             circle_name_jp,     // Japanese name
         })
     }
+}
+
+/// Parse circle name from page title
+/// Title format: "Circle Name（カタカナ） Circle Profile | ..."
+/// Extracts only the name before the katakana pronunciation
+fn parse_circle_name_from_title(title: &str) -> String {
+    let title = title.trim();
+
+    // Remove everything after " Circle Profile" or " サークルプロフィール"
+    let name = title
+        .split(" Circle Profile")
+        .next()
+        .unwrap_or(title)
+        .split(" サークルプロフィール")
+        .next()
+        .unwrap_or(title);
+
+    // Remove katakana pronunciation in Japanese parentheses （...） if present
+    let name = name.split('（').next().unwrap_or(name);
+
+    name.trim().to_string()
+}
+
+/// Scrape circle names from circle profile page TITLE
+/// URL: https://www.dlsite.com/maniax/circle/profile/=/maker_id/<RG Code>.html
+/// Makes 2 requests with different locales to get both EN and JP names
+///
+/// Returns (name_en, name_jp)
+pub async fn scrape_circle_profile(
+    rgcode: &str,
+    client: Option<&reqwest::Client>,
+) -> Result<(String, String), HvtError> {
+    let url_str = format!("https://www.dlsite.com/maniax/circle/profile/=/maker_id/{}.html", rgcode);
+    let url = url_str.parse::<Url>()
+        .map_err(|e| HvtError::Http(format!("Invalid URL: {}", e)))?;
+
+    let default_client = reqwest::Client::new();
+    let http_client = client.unwrap_or(&default_client);
+
+    let title_selector = Selector::parse("title")
+        .map_err(|e| HvtError::Parse(format!("Failed to parse title selector: {:?}", e)))?;
+
+    // Request 1: Get EN name with locale=en_US
+    let resp_en = http_client
+        .get(url.clone())
+        .header("Cookie", "locale=en_US")
+        .header("Accept-Language", "en-US")
+        .send()
+        .await
+        .map_err(|e| HvtError::Http(format!("HTTP request failed (EN): {}", e)))?;
+
+    let html_en = resp_en.text().await
+        .map_err(|e| HvtError::Http(format!("Failed to get response text (EN): {}", e)))?;
+
+    let document_en = Html::parse_document(&html_en);
+    let name_en = if let Some(title_elem) = document_en.select(&title_selector).next() {
+        let title_text = title_elem.text().collect::<Vec<_>>().join("").trim().to_string();
+        parse_circle_name_from_title(&title_text)
+    } else {
+        return Err(HvtError::Parse("No title tag found in circle profile page (EN)".to_string()));
+    };
+
+    // Request 2: Get JP name with locale=ja_JP
+    let resp_jp = http_client
+        .get(url)
+        .header("Cookie", "locale=ja_JP")
+        .header("Accept-Language", "ja-JP")
+        .send()
+        .await
+        .map_err(|e| HvtError::Http(format!("HTTP request failed (JP): {}", e)))?;
+
+    let html_jp = resp_jp.text().await
+        .map_err(|e| HvtError::Http(format!("Failed to get response text (JP): {}", e)))?;
+
+    let document_jp = Html::parse_document(&html_jp);
+    let name_jp = if let Some(title_elem) = document_jp.select(&title_selector).next() {
+        let title_text = title_elem.text().collect::<Vec<_>>().join("").trim().to_string();
+        parse_circle_name_from_title(&title_text)
+    } else {
+        return Err(HvtError::Parse("No title tag found in circle profile page (JP)".to_string()));
+    };
+
+    Ok((name_en, name_jp))
 }

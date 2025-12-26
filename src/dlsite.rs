@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{database::{queries, tables::*}, dlsite::scrapper::DlSiteProductScrapResult, errors::HvtError, folders::types::RJCode, tagger::types::WorkDetails};
 
@@ -76,12 +76,20 @@ pub async fn assign_data_to_work_with_client(
         debug!("assign circle: {:?}", &wd.maker_code);
         let max_cir_id = queries::get_max_id(conn, "cir_id", DB_CIRCLE_NAME)?;
 
-        // Extract both language names from scraper
-        let circle_name_en = sr.circle_name_en.as_deref().unwrap_or("");
-        let circle_name_jp = sr.circle_name_jp.as_deref().unwrap_or("");
+        // Scrape circle names from circle profile page title
+        let (circle_name_en, circle_name_jp) = match scrapper::scrape_circle_profile(
+            wd.maker_code.as_str(),
+            client,
+        ).await {
+            Ok((en, jp)) => (en, jp),
+            Err(e) => {
+                warn!("Failed to scrape circle profile for {}: {}. Using fallback.", wd.maker_code, e);
+                (String::new(), String::new())
+            }
+        };
 
         // Insert circle with BOTH names (EN, JP)
-        queries::insert_circle(conn, &wd.maker_code, circle_name_en, circle_name_jp, max_cir_id + 1)?;
+        queries::insert_circle(conn, &wd.maker_code, &circle_name_en, &circle_name_jp, max_cir_id + 1)?;
 
         // Remove previous assignment before creating new one
         queries::remove_previous_data_of_work(conn, DB_LKP_WORK_CIRCLE_NAME, &work)?;

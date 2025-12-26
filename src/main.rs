@@ -2,12 +2,14 @@
 use clap::Parser;
 use tracing::{info, warn, error, debug};
 
+use std::path::Path;
 use crate::{
     database::{db_loader::open_db, init, queries},
     dlsite::{assign_data_to_work_with_client, DataSelection},
     folders::{get_list_of_folders, get_list_of_unscanned_works, register_folders, types::{ManagedFolder, RJCode}},
-    tagger::{process_work_folder, types::TaggerConfig},
-    vpn::{VpnConfig, VpnProvider, WireGuardManager},
+    tagger::{cover_art, process_work_folder, types::TaggerConfig},
+    vpn::WireGuardManager,
+    config::{Config, VpnProvider},
 };
 
 mod errors;
@@ -16,7 +18,9 @@ mod dlsite;
 mod folders;
 mod database;
 mod tag_manager;
+mod circle_manager;
 mod vpn;
+mod config;
 
 #[derive(Parser, Debug)]
 struct PrgmArgs {
@@ -34,7 +38,7 @@ struct PrgmArgs {
     #[arg(long)]
     collect: bool,
 
-    /// Download cover image links from DLSite (Step 2)
+    /// Download cover images from database links to work folders (Step 2)
     #[arg(long)]
     image: bool,
 
@@ -64,6 +68,10 @@ struct PrgmArgs {
     /// Interactive tag management
     #[arg(long)]
     manage_tags: bool,
+
+    /// Interactive circle management
+    #[arg(long)]
+    manage_circles: bool,
 }
 
 #[tokio::main]
@@ -87,35 +95,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // Handle circle management (early exit if specified)
+    if args.manage_circles {
+        circle_manager::run_interactive_circle_manager(&db)?;
+        return Ok(());
+    }
+
     // Check if we need VPN (only for metadata fetching)
     let needs_vpn = args.collect || args.image || args.full;
 
-    // Load VPN configuration and connect if needed
-    let vpn_config = VpnConfig::load()?;
+    // Load configuration
+    let app_config = Config::load()?;
     let mut vpn_manager: Option<WireGuardManager> = None;
+    let mut was_vpn_already_connected = false;
 
-    if needs_vpn && vpn_config.enabled {
-        match vpn_config.provider {
+    if needs_vpn && app_config.vpn.enabled {
+        match app_config.vpn.provider {
             VpnProvider::Wireguard => {
-                if let Some(ref wg_config) = vpn_config.wireguard {
-                    info!("VPN enabled: Connecting to WireGuard...");
+                if let Some(ref wg_config) = app_config.vpn.wireguard {
                     let mut manager = WireGuardManager::new(wg_config)?;
-                    manager.connect()?;
+
+                    // Check if VPN is already connected
+                    was_vpn_already_connected = manager.interface_exists().unwrap_or(false);
+
+                    if was_vpn_already_connected {
+                        info!("VPN already connected, keeping it active");
+                    } else {
+                        info!("VPN enabled: Connecting to WireGuard...");
+                        manager.connect()?;
+                        info!("VPN connected, waiting for network to stabilize...");
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    }
+
                     vpn_manager = Some(manager);
                 } else {
                     warn!("WireGuard VPN enabled but no configuration found");
                 }
             }
             _ => {
-                warn!("VPN provider {:?} not yet implemented", vpn_config.provider);
+                warn!("VPN provider {:?} not yet implemented", app_config.vpn.provider);
             }
         }
-    }
-
-    // If VPN was just connected, wait for the network stack to stabilize
-    if vpn_manager.is_some() {
-        info!("VPN connected, waiting for network to stabilize...");
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
     }
 
     // Create HTTP client (now using system DNS resolver instead of hickory-dns)
@@ -128,26 +148,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Determine workflow mode
     let result = if args.full {
         // Full workflow: scan -> fetch metadata -> tag
-        run_full_workflow(&db, &args, &http_client).await
+        run_full_workflow(&db, &args, &http_client, &app_config).await
     } else {
         // Individual steps
         if args.input.is_some() || args.rjcode.is_some() {
             step1_scan(&db, &args)?;
         }
 
-        if args.collect || args.image {
+        if args.collect {
             step2_fetch_metadata(&db, &args, &http_client).await?;
         }
 
+        if args.image {
+            step2_download_images(&db).await?;
+        }
+
         if args.tag || args.apply || args.convert {
-            step3_tag_files(&db, &args).await?;
+            step3_tag_files(&db, &args, &app_config).await?;
         }
         Ok(())
     };
 
     // Disconnect VPN before exiting (even on error)
+    // Only disconnect if we connected it ourselves (it wasn't already connected)
     if let Some(mut manager) = vpn_manager {
-        manager.disconnect()?;
+        if !was_vpn_already_connected {
+            info!("Disconnecting VPN (was not connected initially)...");
+            manager.disconnect()?;
+        } else {
+            info!("VPN was already connected initially, keeping it active");
+        }
     }
 
     result
@@ -186,7 +216,7 @@ async fn step2_fetch_metadata(
     args: &PrgmArgs,
     http_client: &reqwest::Client,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!("\n=== STEP 2: FETCHING METADATA FROM DLSITE ===");
+    info!("=== STEP 2: FETCHING METADATA FROM DLSITE ===");
 
     // Build data selection based on CLI args
     let data_selection = DataSelection {
@@ -196,7 +226,7 @@ async fn step2_fetch_metadata(
         rating: args.collect,
         cvs: args.collect,
         stars: args.collect,
-        cover_link: args.image,
+        cover_link: args.collect,  // Always fetch cover links when collecting metadata
     };
 
     // Get works to process
@@ -233,19 +263,83 @@ async fn step2_fetch_metadata(
     Ok(())
 }
 
+/// Step 2b: Download cover images from database links to work folders
+async fn step2_download_images(
+    db: &rusqlite::Connection,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!("=== DOWNLOADING COVER IMAGES ===");
+
+    // Get all works with cover links
+    let works_with_covers = queries::get_all_works_with_cover_links(db)?;
+
+    if works_with_covers.is_empty() {
+        info!("No works with cover links found in database");
+        info!("Run --collect --image first to fetch cover links from DLSite");
+        return Ok(());
+    }
+
+    info!("Found {} work(s) with cover links", works_with_covers.len());
+
+    let mut downloaded = 0;
+    let mut skipped = 0;
+    let mut failed = 0;
+
+    for (work, folder_path, cover_url) in works_with_covers {
+        let folder_path_obj = Path::new(&folder_path);
+
+        // Skip if folder doesn't exist
+        if !folder_path_obj.exists() {
+            warn!("Folder not found: {} ({})", work, folder_path);
+            failed += 1;
+            continue;
+        }
+
+        // Skip if cover already exists
+        if cover_art::has_cover_art(folder_path_obj) {
+            debug!("Cover already exists: {} ({})", work, folder_path);
+            skipped += 1;
+            continue;
+        }
+
+        info!("Downloading cover for {}...", work);
+        match cover_art::download_and_save_cover(
+            &cover_url,
+            folder_path_obj,
+            None,  // Keep original dimensions from DLSite
+        ).await {
+            Ok(_) => {
+                info!("  {} ... cover downloaded", work);
+                downloaded += 1;
+            }
+            Err(e) => {
+                warn!("  {} ... failed to download cover: {}", work, e);
+                failed += 1;
+            }
+        }
+    }
+
+    info!("\n=== COVER DOWNLOAD SUMMARY ===");
+    info!("Downloaded: {}", downloaded);
+    info!("Skipped (already exist): {}", skipped);
+    info!("Failed: {}", failed);
+
+    Ok(())
+}
+
 /// Step 3: Tag and convert audio files
 async fn step3_tag_files(
     db: &rusqlite::Connection,
     args: &PrgmArgs,
+    app_config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("\n=== STEP 3: TAGGING AUDIO FILES ===");
 
-    // Create tagger config from CLI arguments
+    // Create tagger config from CLI arguments and app config
     let tagger_config = TaggerConfig {
         convert_to_mp3: args.convert,
         target_bitrate: 320,
         download_cover: args.image,
-        cover_size: (300, 300),
+        tag_separator: app_config.tagger.get_separator(),
     };
 
     // Get works to process with their paths
@@ -287,6 +381,7 @@ async fn run_full_workflow(
     db: &rusqlite::Connection,
     args: &PrgmArgs,
     http_client: &reqwest::Client,
+    app_config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!("=== RUNNING FULL WORKFLOW ===\n");
 
@@ -333,7 +428,7 @@ async fn run_full_workflow(
         convert_to_mp3: args.convert,
         target_bitrate: 320,
         download_cover: true,  // Always download covers in full mode
-        cover_size: (300, 300),
+        tag_separator: app_config.tagger.get_separator(),
     };
 
     // Get the newly scanned works with their paths from DB

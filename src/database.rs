@@ -8,6 +8,7 @@ pub mod queries;
 pub mod sql;
 pub mod tables;
 pub mod custom_tags;
+pub mod custom_circles;
 
 pub fn init(conn: &Connection) -> Result<(), HvtError> {
     // Ensure foreign keys are enabled (additional safety check)
@@ -36,6 +37,14 @@ pub fn init(conn: &Connection) -> Result<(), HvtError> {
 
     // Custom tags table (global mapping)
     conn.execute(&init_table(DB_CUSTOM_TAG_MAPPINGS_NAME, DB_CUSTOM_TAG_MAPPINGS_COLS), [])?;
+
+    // Custom circle mappings table (global mapping)
+    conn.execute(&init_table(DB_CUSTOM_CIRCLE_MAPPINGS_NAME, DB_CUSTOM_CIRCLE_MAPPINGS_COLS), [])?;
+
+    // Track parsing preferences table
+    conn.execute(&init_table(DB_TRACK_PARSING_PREFS_NAME, DB_TRACK_PARSING_PREFS_COLS), [])?;
+    conn.execute(DB_TRACK_PARSING_PREFS_INDEX, [])?;
+
     conn.execute(DB_FILE_PROCESSING_INDEX_FLD_ID, [])?;
     conn.execute(DB_FILE_PROCESSING_INDEX_TAG_DATE, [])?;
 

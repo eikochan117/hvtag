@@ -2,6 +2,7 @@ use rusqlite::{Connection, params};
 use crate::folders::types::{ManagedFolder, RGCode, RJCode};
 use crate::database::tables::*;
 use crate::errors::HvtError;
+use crate::tagger::track_parser::TrackParsingPreference;
 
 /// Insert a managed folder into the database
 pub fn insert_managed_folder(
@@ -336,4 +337,79 @@ pub fn get_unscanned_works_with_paths(conn: &Connection) -> Result<Vec<(RJCode, 
     })?;
     let works: Vec<(RJCode, String)> = rows.collect::<Result<Vec<_>, _>>()?;
     Ok(works)
+}
+
+/// Get all works with cover links and their folder paths
+/// Returns Vec<(RJCode, folder_path, cover_url)>
+pub fn get_all_works_with_cover_links(conn: &Connection) -> Result<Vec<(RJCode, String, String)>, HvtError> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT f.rjcode, f.path, dc.link
+         FROM {DB_FOLDERS_NAME} f
+         INNER JOIN {DB_DLSITE_COVERS_LINK_NAME} dc ON f.fld_id = dc.fld_id
+         WHERE f.active = 1 AND f.path IS NOT NULL AND dc.link IS NOT NULL
+         ORDER BY f.rjcode"
+    ))?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })?;
+
+    let works: Vec<(RJCode, String, String)> = rows.collect::<Result<Vec<_>, _>>()?;
+    Ok(works)
+}
+
+/// Get track parsing preference for a work
+pub fn get_track_parsing_preference(
+    conn: &Connection,
+    rjcode: &RJCode,
+) -> Result<Option<TrackParsingPreference>, HvtError> {
+    let result = conn.query_row(
+        &format!(
+            "SELECT strategy_name, custom_delimiter, use_asian_conversion, asian_format_type
+             FROM {DB_TRACK_PARSING_PREFS_NAME}
+             WHERE fld_id = (SELECT fld_id FROM {DB_FOLDERS_NAME} WHERE rjcode = ?1)"
+        ),
+        params![rjcode],
+        |row| {
+            Ok(TrackParsingPreference {
+                strategy_name: row.get(0)?,
+                custom_delimiter: row.get(1)?,
+                use_asian_conversion: row.get::<_, i64>(2)? != 0,
+                asian_format_type: row.get(3)?,
+            })
+        },
+    );
+
+    match result {
+        Ok(pref) => Ok(Some(pref)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Save track parsing preference for a work
+pub fn save_track_parsing_preference(
+    conn: &Connection,
+    rjcode: &RJCode,
+    preference: &TrackParsingPreference,
+) -> Result<(), HvtError> {
+    conn.execute(
+        &format!(
+            "INSERT OR REPLACE INTO {DB_TRACK_PARSING_PREFS_NAME}
+             (fld_id, strategy_name, custom_delimiter, use_asian_conversion, asian_format_type, last_used)
+             VALUES (
+                 (SELECT fld_id FROM {DB_FOLDERS_NAME} WHERE rjcode = ?1),
+                 ?2, ?3, ?4, ?5, datetime('now')
+             )"
+        ),
+        params![
+            rjcode,
+            &preference.strategy_name,
+            &preference.custom_delimiter,
+            preference.use_asian_conversion,
+            &preference.asian_format_type,
+        ],
+    )?;
+
+    Ok(())
 }

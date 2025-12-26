@@ -131,8 +131,34 @@ pub const DB_CUSTOM_TAG_MAPPINGS_COLS: &str = "dlsite_tag_id INTEGER PRIMARY KEY
     modified_at TEXT DEFAULT (datetime('now')), \
     FOREIGN KEY (dlsite_tag_id) REFERENCES dlsite_tag(tag_id) ON DELETE CASCADE";
 
+// Custom circle mappings - mapping GLOBAL des circles vers préférences de noms
+// Un seul mapping par circle, s'applique à TOUTES les œuvres de ce circle
+// preference_type: 'force_en', 'force_jp', 'custom', 'use_code'
+pub const DB_CUSTOM_CIRCLE_MAPPINGS_NAME: &str = "custom_circle_mappings";
+pub const DB_CUSTOM_CIRCLE_MAPPINGS_COLS: &str = "cir_id INTEGER PRIMARY KEY, \
+    preference_type TEXT NOT NULL CHECK(preference_type IN ('force_en', 'force_jp', 'custom', 'use_code')), \
+    custom_name TEXT, \
+    created_at TEXT DEFAULT (datetime('now')), \
+    modified_at TEXT DEFAULT (datetime('now')), \
+    FOREIGN KEY (cir_id) REFERENCES circles(cir_id) ON DELETE CASCADE";
+
 // Indexes pour file_processing
 pub const DB_FILE_PROCESSING_INDEX_FLD_ID: &str =
     "CREATE INDEX IF NOT EXISTS idx_file_processing_fld_id ON file_processing(fld_id)";
 pub const DB_FILE_PROCESSING_INDEX_TAG_DATE: &str =
     "CREATE INDEX IF NOT EXISTS idx_file_processing_tag_date ON file_processing(tag_date)";
+
+// Track number parsing preferences (per work)
+pub const DB_TRACK_PARSING_PREFS_NAME: &str = "track_parsing_preferences";
+pub const DB_TRACK_PARSING_PREFS_COLS: &str = "pref_id INTEGER PRIMARY KEY AUTOINCREMENT, \
+    fld_id INTEGER NOT NULL UNIQUE, \
+    strategy_name TEXT NOT NULL, \
+    custom_delimiter TEXT, \
+    use_asian_conversion BOOLEAN DEFAULT 0, \
+    asian_format_type TEXT, \
+    created_at TEXT DEFAULT (datetime('now')), \
+    last_used TEXT DEFAULT (datetime('now')), \
+    FOREIGN KEY (fld_id) REFERENCES folders(fld_id) ON DELETE CASCADE";
+
+pub const DB_TRACK_PARSING_PREFS_INDEX: &str =
+    "CREATE INDEX IF NOT EXISTS idx_track_parsing_fld_id ON track_parsing_preferences(fld_id)";

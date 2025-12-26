@@ -5,7 +5,7 @@ use crate::tagger::types::AudioMetadata;
 
 /// Writes ID3v2 tags to an MP3 file
 /// Note: Cover art is NOT embedded - it's saved separately as folder.jpeg
-pub fn write_id3_tags(file_path: &Path, metadata: &AudioMetadata) -> Result<(), HvtError> {
+pub fn write_id3_tags(file_path: &Path, metadata: &AudioMetadata, separator: &str) -> Result<(), HvtError> {
     let mut tag = match id3::Tag::read_from_path(file_path) {
         Ok(t) => t,
         Err(_) => id3::Tag::new(),
@@ -16,9 +16,9 @@ pub fn write_id3_tags(file_path: &Path, metadata: &AudioMetadata) -> Result<(), 
     tag.set_album(&metadata.album);
     tag.set_album_artist(&metadata.album_artist);
 
-    // Set artists (voice actors) - multiple artists separated by semicolon
+    // Set artists (voice actors) - multiple artists separated by configured separator
     if !metadata.artists.is_empty() {
-        let artists_string = metadata.artists.join(";");
+        let artists_string = metadata.artists.join(separator);
         tag.set_artist(&artists_string);
     }
 
@@ -35,9 +35,9 @@ pub fn write_id3_tags(file_path: &Path, metadata: &AudioMetadata) -> Result<(), 
         // Skipping for now as it requires specific date format parsing
     }
 
-    // Set genre (concatenate all genres with semicolon)
+    // Set genre (concatenate all genres with configured separator)
     if !metadata.genre.is_empty() {
-        let genre_string = metadata.genre.join(";");
+        let genre_string = metadata.genre.join(separator);
         tag.set_genre(&genre_string);
     }
 
