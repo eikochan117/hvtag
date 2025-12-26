@@ -35,6 +35,8 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
+        env:
+          RUSTFLAGS: ""  # Allow warnings during compilation
 
       - name: Rename binary
         shell: bash
