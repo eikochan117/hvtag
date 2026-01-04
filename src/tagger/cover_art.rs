@@ -5,10 +5,10 @@ use image::ImageFormat;
 
 /// Get the cache directory for covers
 fn get_cache_dir() -> Result<PathBuf, HvtError> {
-    let home = std::env::var("HOME")
-        .map_err(|_| HvtError::Generic("HOME environment variable not set".to_string()))?;
+    let home = dirs::home_dir()
+        .ok_or_else(|| HvtError::Generic("Could not determine home directory".to_string()))?;
 
-    let cache_dir = PathBuf::from(home).join(".hvtag").join("covers_cache");
+    let cache_dir = home.join(".hvtag").join("covers_cache");
 
     // Create cache directory if it doesn't exist
     if !cache_dir.exists() {

@@ -25,26 +25,29 @@ mod config;
 
 #[derive(Parser, Debug)]
 struct PrgmArgs {
-    // ===== STEP 1: SCAN =====
-    /// Directory to scan for audio works (Step 1)
+    // ===== IMPORT WORKFLOW =====
+    /// Import: scan from config source_path, process, then move to library_path
     #[arg(long)]
-    input: Option<String>,
+    import: bool,
 
-    /// Specific RJCode to process (Step 1)
+    /// Scan library_path and add missing works to database
+    #[arg(long)]
+    scan: bool,
+
+    /// Specific RJCode to process
     #[arg(long)]
     rjcode: Option<String>,
 
-    // ===== STEP 2: FETCH METADATA =====
-    /// Collect metadata from DLSite (Step 2)
+    // ===== PROCESSING STEPS =====
+    /// Collect metadata from DLSite
     #[arg(long)]
     collect: bool,
 
-    /// Download cover images from database links to work folders (Step 2)
+    /// Download cover images from database links to work folders
     #[arg(long)]
     image: bool,
 
-    // ===== STEP 3: TAG & CONVERT =====
-    /// Apply tags to audio files (Step 3)
+    /// Apply tags to audio files
     #[arg(long)]
     tag: bool,
 
@@ -52,20 +55,11 @@ struct PrgmArgs {
     #[arg(long)]
     apply: bool,
 
-    /// Convert files to MP3 320kbps (Step 3)
+    /// Convert files to MP3 320kbps
     #[arg(long)]
     convert: bool,
 
-    // ===== WORKFLOW =====
-    /// Run all 3 steps for newly scanned works (scan -> fetch metadata -> tag)
-    #[arg(long)]
-    full: bool,
-
     // ===== OTHER =====
-    /// Move tagged files to destination
-    #[arg(long)]
-    r#move: Option<String>,
-
     /// Interactive tag management
     #[arg(long)]
     manage_tags: bool,
@@ -102,113 +96,174 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // Check if we need VPN (only for metadata fetching)
-    let needs_vpn = args.collect || args.image || args.full;
-
     // Load configuration
     let app_config = Config::load()?;
 
-    // ========== PRE-VPN PHASE: Local filesystem operations ==========
-    // Do all local scanning BEFORE connecting VPN to avoid losing access to network shares
-
-    if args.input.is_some() || args.rjcode.is_some() {
-        step1_scan(&db, &args)?;
+    // --scan: Add existing works from library_path to database
+    if args.scan {
+        run_scan_workflow(&db, &app_config)?;
+        return Ok(());
     }
 
-    // Pre-scan for images: identify which covers are missing BEFORE VPN connects
-    let works_needing_covers = if args.image || args.full {
-        info!("Pre-scanning for missing covers...");
-        identify_works_needing_covers(&db)?
+    // --import workflow (for new works from source directory)
+    if args.import {
+        run_import_workflow(&db, &args, &app_config).await?;
+        return Ok(());
+    }
+
+    // Standalone commands for existing works in database
+    let has_action = args.collect || args.image || args.tag || args.apply || args.convert;
+
+    if !has_action {
+        info!("No action specified. Use --import to process new works, or --help for options.");
+        info!("Use --collect/--tag/--image to process existing works in database.");
+        return Ok(());
+    }
+
+    // Run standalone workflow for existing database works
+    run_standalone_workflow(&db, &args, &app_config).await?;
+
+    Ok(())
+}
+
+/// Scan workflow: Add existing works from library_path to database
+fn run_scan_workflow(
+    db: &rusqlite::Connection,
+    app_config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let library_path = app_config.import.library_path.as_ref()
+        .ok_or_else(|| errors::HvtError::Generic(
+            "Please configure import.library_path in config.toml".to_string()
+        ))?;
+
+    info!("=== SCAN WORKFLOW ===");
+    info!("Library: {}", library_path);
+
+    // Scan library directory for RJ folders
+    info!("\n--- Scanning library directory ---");
+    let library_folders = get_list_of_folders(library_path)?;
+
+    if library_folders.is_empty() {
+        info!("No valid RJ folders found in library directory");
+        return Ok(());
+    }
+
+    info!("Found {} folder(s) in library", library_folders.len());
+
+    // Get existing works from database
+    let existing_works: std::collections::HashSet<String> = queries::get_all_works(db)?
+        .into_iter()
+        .map(|rj| rj.to_string())
+        .collect();
+
+    // Filter to only new works
+    let new_folders: Vec<_> = library_folders
+        .into_iter()
+        .filter(|f| !existing_works.contains(&f.rjcode.to_string()))
+        .collect();
+
+    if new_folders.is_empty() {
+        info!("All folders are already registered in database");
+        return Ok(());
+    }
+
+    info!("Found {} new folder(s) to register", new_folders.len());
+
+    // Register new folders
+    let pb = create_progress_bar(new_folders.len() as u64);
+    let mut registered = 0;
+
+    for folder in &new_folders {
+        pb.set_message(format!("Registering {}", folder.rjcode));
+
+        match register_folders(db, vec![folder.clone()]) {
+            Ok(_) => {
+                pb.println(&format!("{} ✓", folder.rjcode));
+                registered += 1;
+            }
+            Err(e) => {
+                warn!("Failed to register {}: {}", folder.rjcode, e);
+                pb.println(&format!("{} ✗", folder.rjcode));
+            }
+        }
+
+        pb.inc(1);
+    }
+
+    pb.finish_and_clear();
+    info!("\n=== SCAN COMPLETE ===");
+    info!("Registered: {} new work(s)", registered);
+
+    Ok(())
+}
+
+/// Standalone workflow for existing works in database
+async fn run_standalone_workflow(
+    db: &rusqlite::Connection,
+    args: &PrgmArgs,
+    app_config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!("=== STANDALONE WORKFLOW (existing works) ===");
+
+    // Identify works that need cover downloads
+    let works_needing_covers = if args.image {
+        identify_works_needing_covers(db)?
     } else {
-        Vec::new()
+        vec![]
     };
 
-    // ========== VPN PHASE: Connect if needed ==========
-    let mut vpn_manager: Option<WireGuardManager> = None;
-    let mut was_vpn_already_connected = false;
+    // Get all works with cover links from database (for tagging)
+    let all_works_with_covers = queries::get_all_works_with_cover_links(db)?;
+
+    // Setup VPN if needed for network operations
+    let needs_vpn = args.collect || (args.image && !works_needing_covers.is_empty());
+    let mut vpn_manager: Option<vpn::wireguard::WireGuardManager> = None;
+
+    debug!("VPN check: needs_vpn={}, vpn.enabled={}, wireguard={:?}",
+           needs_vpn, app_config.vpn.enabled, app_config.vpn.wireguard.is_some());
 
     if needs_vpn && app_config.vpn.enabled {
-        match app_config.vpn.provider {
-            VpnProvider::Wireguard => {
-                if let Some(ref wg_config) = app_config.vpn.wireguard {
-                    let mut manager = WireGuardManager::new(wg_config)?;
-
-                    // Check if VPN is already connected
-                    was_vpn_already_connected = manager.interface_exists().unwrap_or(false);
-
-                    if was_vpn_already_connected {
-                        info!("VPN already connected, keeping it active");
-                    } else {
-                        info!("VPN enabled: Connecting to WireGuard...");
-                        manager.connect()?;
-                        info!("VPN connected, waiting for network to stabilize...");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                    }
-
-                    vpn_manager = Some(manager);
-                } else {
-                    warn!("WireGuard VPN enabled but no configuration found");
-                }
-            }
-            _ => {
-                warn!("VPN provider {:?} not yet implemented", app_config.vpn.provider);
-            }
+        if let Some(ref wg_config) = app_config.vpn.wireguard {
+            info!("Connecting VPN...");
+            let mut manager = vpn::wireguard::WireGuardManager::new(wg_config)?;
+            manager.connect()?;
+            vpn_manager = Some(manager);
+        } else {
+            warn!("VPN enabled but no wireguard config found!");
         }
+    } else if needs_vpn {
+        info!("VPN needed but disabled in config, skipping...");
     }
 
-    // Create HTTP client (now using system DNS resolver instead of hickory-dns)
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
-        .cookie_store(true)
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         .build()?;
 
-    // ========== WORKFLOW EXECUTION (with VPN active if needed) ==========
-    let result = if args.full {
-        // Full workflow: fetch metadata -> download images
-        run_full_workflow(&db, &args, &http_client, &app_config, &works_needing_covers).await
-    } else {
-        // Individual steps (VPN-dependent operations only)
-        if args.collect {
-            step2_fetch_metadata(&db, &args, &http_client).await?;
-        }
-
-        if args.image && !works_needing_covers.is_empty() {
-            step2_download_images_filtered(&db, &works_needing_covers).await?;
-        }
-        Ok(())
-    };
-
-    // Disconnect VPN before post-VPN operations
-    if let Some(mut manager) = vpn_manager {
-        if !was_vpn_already_connected {
-            info!("Disconnecting VPN (was not connected initially)...");
-            manager.disconnect()?;
-        } else {
-            info!("VPN was already connected initially, keeping it active");
-        }
+    // --collect: Fetch metadata for works in database
+    if args.collect {
+        step2_fetch_metadata(db, args, &http_client).await?;
     }
 
-    // Return early on error before post-VPN phase
-    result?;
-
-    // ========== POST-VPN PHASE: Local filesystem operations ==========
-    // Copy cached covers and tag files AFTER VPN is disconnected to ensure network share access
-
-    // Copy covers from cache to their final destinations
-    if (args.image || args.full) && !works_needing_covers.is_empty() {
-        step_copy_cached_covers(&works_needing_covers)?;
+    // --image: Download covers for works in database
+    if args.image && !works_needing_covers.is_empty() {
+        step2_download_images_filtered(db, &works_needing_covers).await?;
     }
 
-    if args.tag || args.apply || args.convert || args.full {
-        step3_tag_files(&db, &args, &app_config).await?;
+    // Disconnect VPN after network operations
+    if let Some(ref mut manager) = vpn_manager {
+        info!("Disconnecting VPN...");
+        manager.disconnect()?;
     }
 
-    // Move files if requested
-    if let Some(ref destination) = args.r#move {
-        step_move_files(&db, &args, destination)?;
+    // --tag / --apply: Tag files for works in database
+    if args.tag || args.apply {
+        // First copy cached covers to folders
+        step_copy_cached_covers(&all_works_with_covers)?;
+        // Then tag
+        step3_tag_files(db, args, app_config).await?;
     }
 
+    info!("=== DONE ===");
     Ok(())
 }
 
@@ -223,33 +278,6 @@ fn create_progress_bar(len: u64) -> ProgressBar {
             .progress_chars("=>-")
     );
     pb
-}
-
-/// Step 1: Scan directories for audio works
-fn step1_scan(db: &rusqlite::Connection, args: &PrgmArgs) -> Result<(), Box<dyn std::error::Error>> {
-    info!("=== STEP 1: SCANNING FOLDERS ===");
-
-    let scan_path = if let Some(ref input) = args.input {
-        input.clone()
-    } else if let Some(ref rjcode) = args.rjcode {
-        // If --rjcode is provided, scan current directory
-        std::env::current_dir()?.to_string_lossy().to_string()
-    } else {
-        // Scan current directory by default
-        std::env::current_dir()?.to_string_lossy().to_string()
-    };
-
-    info!("Scanning: {}", scan_path);
-
-    let folders = get_list_of_folders(&scan_path)?;
-    info!("Found {} valid RJ folders", folders.len());
-
-    if !folders.is_empty() {
-        register_folders(db, folders)?;
-        info!("Folders registered in database");
-    }
-
-    Ok(())
 }
 
 /// Step 2: Fetch metadata from DLSite
@@ -476,12 +504,8 @@ async fn step3_tag_files(
 
     // Get works to process with their paths
     let works_with_paths: Vec<(RJCode, String)> = if let Some(ref rjcode) = args.rjcode {
-        // For specific RJCode, use current directory or input path
-        let path = if let Some(ref input) = args.input {
-            input.clone()
-        } else {
-            std::env::current_dir()?.to_string_lossy().to_string()
-        };
+        // For specific RJCode, use current directory
+        let path = std::env::current_dir()?.to_string_lossy().to_string();
         vec![(RJCode::new(rjcode.clone())?, path)]
     } else {
         // Get all works from DB with their stored paths
@@ -525,166 +549,307 @@ async fn step3_tag_files(
     Ok(())
 }
 
-/// Move tagged files to destination directory
-fn step_move_files(
-    db: &rusqlite::Connection,
-    args: &PrgmArgs,
-    destination: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    info!("\n=== MOVING FILES TO DESTINATION ===");
-    info!("Destination: {}", destination);
+/// Move folder with cross-drive support (copy + delete fallback)
+fn move_folder_cross_drive(source: &Path, target: &Path) -> Result<(), errors::HvtError> {
+    // Try rename first (fast, works on same drive)
+    match std::fs::rename(source, target) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            // Check if it's a cross-device error (errno 17 on Unix, various on Windows)
+            let is_cross_device = e.raw_os_error().map_or(false, |code| {
+                // EXDEV on Unix, ERROR_NOT_SAME_DEVICE on Windows
+                code == 17 || code == 18 || code == 0x11
+            });
 
-    // Create destination directory if it doesn't exist
-    let dest_path = Path::new(destination);
-    if !dest_path.exists() {
-        std::fs::create_dir_all(dest_path)?;
-        info!("Created destination directory: {}", destination);
-    }
-
-    // Get works to move
-    let works_with_paths: Vec<(RJCode, String)> = if let Some(ref input) = args.input {
-        // If --input is specified, only move works from that directory
-        let folders = get_list_of_folders(input)?;
-        folders.into_iter()
-            .map(|f| (f.rjcode.clone(), f.path.clone()))
-            .collect()
-    } else if let Some(ref rjcode) = args.rjcode {
-        // If --rjcode is specified, move only that specific work
-        let path = std::env::current_dir()?.to_string_lossy().to_string();
-        vec![(RJCode::new(rjcode.clone())?, path)]
-    } else {
-        // Move all works from database
-        queries::get_all_works_with_paths(db)?
-    };
-
-    if works_with_paths.is_empty() {
-        info!("No works to move");
-        return Ok(());
-    }
-
-    info!("Moving {} work(s)...", works_with_paths.len());
-
-    let pb = create_progress_bar(works_with_paths.len() as u64);
-
-    let mut moved = 0;
-    let mut failed = 0;
-
-    for (work, old_path) in works_with_paths {
-        pb.set_message(format!("Moving {}", work));
-
-        let old_path_obj = Path::new(&old_path);
-
-        if !old_path_obj.exists() {
-            warn!("Source folder not found: {}", old_path);
-            pb.println(&format!("{} (source not found)", work));
-            failed += 1;
-            pb.inc(1);
-            continue;
-        }
-
-        // New path: destination/folder_name
-        let folder_name = old_path_obj.file_name()
-            .ok_or_else(|| format!("Invalid folder path: {}", old_path))?;
-        let new_path = dest_path.join(folder_name);
-
-        // Move the folder
-        match std::fs::rename(old_path_obj, &new_path) {
-            Ok(_) => {
-                // Update path in database
-                let new_path_str = new_path.to_string_lossy().to_string();
-                match queries::update_folder_path(db, &work, &new_path_str) {
-                    Ok(_) => {
-                        pb.println(&format!("{} ✓", work));
-                        moved += 1;
-                    }
-                    Err(e) => {
-                        warn!("Moved folder but failed to update DB for {}: {}", work, e);
-                        pb.println(&format!("{} ⚠ (DB update failed)", work));
-                        failed += 1;
-                    }
-                }
-            }
-            Err(e) => {
-                warn!("Failed to move {}: {}", work, e);
-                pb.println(&format!("{} ✗", work));
-                failed += 1;
+            if is_cross_device || cfg!(target_os = "windows") {
+                // Fallback: copy then delete
+                debug!("Cross-drive move detected, using copy+delete for {}", source.display());
+                copy_dir_recursive(source, target)?;
+                std::fs::remove_dir_all(source)
+                    .map_err(|e| errors::HvtError::Generic(format!(
+                        "Failed to remove source after copy: {}", e
+                    )))?;
+                Ok(())
+            } else {
+                Err(errors::HvtError::Generic(format!("Failed to move folder: {}", e)))
             }
         }
-
-        pb.inc(1);
     }
+}
 
-    pb.finish_and_clear();
-    info!("Moved: {} | Failed: {}", moved, failed);
+/// Recursively copy a directory
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), errors::HvtError> {
+    std::fs::create_dir_all(dst)
+        .map_err(|e| errors::HvtError::Generic(format!("Failed to create directory {}: {}", dst.display(), e)))?;
+
+    for entry in std::fs::read_dir(src)
+        .map_err(|e| errors::HvtError::Generic(format!("Failed to read directory {}: {}", src.display(), e)))?
+    {
+        let entry = entry.map_err(|e| errors::HvtError::Generic(format!("Failed to read entry: {}", e)))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)
+                .map_err(|e| errors::HvtError::Generic(format!(
+                    "Failed to copy {} to {}: {}", src_path.display(), dst_path.display(), e
+                )))?;
+        }
+    }
 
     Ok(())
 }
 
-/// Full workflow: fetch metadata -> download covers
-/// Note: Scanning and tagging are done outside this function to manage VPN connection properly
-async fn run_full_workflow(
+/// Import workflow: scan source -> process -> move to library
+async fn run_import_workflow(
     db: &rusqlite::Connection,
     args: &PrgmArgs,
-    http_client: &reqwest::Client,
     app_config: &Config,
-    works_needing_covers: &[(RJCode, String, String)],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!("=== RUNNING FULL WORKFLOW (VPN PHASE) ===\n");
+    // Validate config
+    let source_path = app_config.import.source_path.as_ref()
+        .ok_or_else(|| errors::HvtError::Generic(
+            "Please configure import.source_path in config.toml".to_string()
+        ))?;
+    let library_path = app_config.import.library_path.as_ref()
+        .ok_or_else(|| errors::HvtError::Generic(
+            "Please configure import.library_path in config.toml".to_string()
+        ))?;
 
-    // Step 2: Fetch metadata for newly scanned works
-    let unscanned_works = get_list_of_unscanned_works(db, None)?;
+    info!("=== IMPORT WORKFLOW ===");
+    info!("Source: {}", source_path);
+    info!("Library: {}", library_path);
 
-    if unscanned_works.is_empty() {
-        info!("No new works to process");
+    // ========== PRE-VPN PHASE ==========
+    // 1. Scan source directory
+    info!("\n--- Scanning source directory ---");
+    let source_folders = get_list_of_folders(source_path)?;
+
+    if source_folders.is_empty() {
+        info!("No valid RJ folders found in source directory");
         return Ok(());
     }
 
-    info!("Found {} newly scanned work(s)", unscanned_works.len());
+    info!("Found {} folder(s) to import", source_folders.len());
 
-    let data_selection = DataSelection {
-        tags: true,
-        release_date: true,
-        circle: true,
-        rating: true,
-        cvs: true,
-        stars: true,
-        cover_link: true,
-    };
+    // 2. Filter out folders that already exist in library
+    let library_path_obj = Path::new(library_path);
+    if !library_path_obj.exists() {
+        std::fs::create_dir_all(library_path_obj)?;
+        info!("Created library directory: {}", library_path);
+    }
 
-    // Create progress bar
-    let pb = create_progress_bar(unscanned_works.len() as u64);
+    let mut folders_to_process: Vec<ManagedFolder> = Vec::new();
+    for folder in source_folders {
+        let folder_name = Path::new(&folder.path).file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+        let target_path = library_path_obj.join(folder_name);
 
-    for work in &unscanned_works {
-        pb.set_message(format!("Fetching {}", work));
+        if target_path.exists() {
+            warn!("{} already exists in library, skipping", folder.rjcode);
+        } else {
+            folders_to_process.push(folder);
+        }
+    }
 
-        let result_msg = match assign_data_to_work_with_client(db, work.clone(), data_selection.clone(), Some(http_client)).await {
-            Ok(_) => {
-                format!("{} ✓", work)
+    if folders_to_process.is_empty() {
+        info!("All folders already exist in library, nothing to import");
+        return Ok(());
+    }
+
+    info!("{} folder(s) to process", folders_to_process.len());
+
+    // Check if we need VPN
+    let needs_vpn = args.collect || args.image;
+
+    // ========== VPN PHASE ==========
+    let mut vpn_manager: Option<WireGuardManager> = None;
+
+    if needs_vpn && app_config.vpn.enabled {
+        match app_config.vpn.provider {
+            VpnProvider::Wireguard => {
+                if let Some(ref wg_config) = app_config.vpn.wireguard {
+                    let mut manager = WireGuardManager::new(wg_config)?;
+
+                    if manager.interface_exists().unwrap_or(false) {
+                        info!("VPN already connected, reusing");
+                    } else {
+                        info!("Connecting VPN...");
+                        manager.connect()?;
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    }
+
+                    vpn_manager = Some(manager);
+                }
             }
-            Err(errors::HvtError::RemovedWork(rjcode)) => {
-                queries::insert_error(db, &rjcode, "removed work", Some("dlsite_removed"))?;
-                format!("{} (removed)", work)
-            }
-            Err(e) => {
-                error!("Error processing {}: {}", work, e);
-                queries::insert_error(db, work, &e.to_string(), Some("fetch_error"))?;
-                format!("{} ✗", work)
-            }
+            _ => warn!("VPN provider {:?} not implemented", app_config.vpn.provider),
+        }
+    }
+
+    // Create HTTP client
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .cookie_store(true)
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .build()?;
+
+    // Collect metadata if requested
+    if args.collect {
+        info!("\n--- Fetching metadata ---");
+        let data_selection = DataSelection {
+            tags: true,
+            release_date: true,
+            circle: true,
+            rating: true,
+            cvs: true,
+            stars: true,
+            cover_link: true,
         };
 
-        pb.println(&result_msg);
+        let pb = create_progress_bar(folders_to_process.len() as u64);
+
+        for folder in &folders_to_process {
+            pb.set_message(format!("Fetching {}", folder.rjcode));
+
+            let result_msg = match assign_data_to_work_with_client(
+                db, folder.rjcode.clone(), data_selection.clone(), Some(&http_client)
+            ).await {
+                Ok(_) => format!("{} ✓", folder.rjcode),
+                Err(errors::HvtError::RemovedWork(rjcode)) => {
+                    queries::insert_error(db, &rjcode, "removed work", Some("dlsite_removed"))?;
+                    format!("{} (removed)", folder.rjcode)
+                }
+                Err(e) => {
+                    error!("Error fetching {}: {}", folder.rjcode, e);
+                    format!("{} ✗", folder.rjcode)
+                }
+            };
+
+            pb.println(&result_msg);
+            pb.inc(1);
+        }
+
+        pb.finish_and_clear();
+    }
+
+    // Download covers if requested
+    if args.image {
+        info!("\n--- Downloading covers ---");
+        let pb = create_progress_bar(folders_to_process.len() as u64);
+
+        for folder in &folders_to_process {
+            pb.set_message(format!("Cover {}", folder.rjcode));
+
+            // Get cover URL from database
+            if let Ok(Some(cover_url)) = queries::get_cover_link(db, &folder.rjcode) {
+                match cover_art::download_cover_to_cache(&cover_url, &folder.rjcode.to_string(), Some((500, 500))).await {
+                    Ok(_) => pb.println(&format!("{} cover ✓", folder.rjcode)),
+                    Err(e) => {
+                        warn!("Failed to download cover for {}: {}", folder.rjcode, e);
+                        pb.println(&format!("{} cover ✗", folder.rjcode));
+                    }
+                }
+            }
+
+            pb.inc(1);
+        }
+
+        pb.finish_and_clear();
+    }
+
+    // Disconnect VPN before filesystem operations
+    drop(vpn_manager);
+
+    // ========== POST-VPN PHASE ==========
+
+    // Copy covers from cache to source folders
+    if args.image {
+        info!("\n--- Copying covers to folders ---");
+        for folder in &folders_to_process {
+            let folder_path = Path::new(&folder.path);
+            if let Err(e) = cover_art::copy_cover_from_cache(&folder.rjcode.to_string(), folder_path) {
+                debug!("No cached cover for {}: {}", folder.rjcode, e);
+            }
+        }
+    }
+
+    // Tag files if requested
+    if args.tag || args.apply {
+        info!("\n--- Tagging files ---");
+        let tagger_config = TaggerConfig {
+            tag_separator: app_config.tagger.get_separator(),
+            convert_to_mp3: args.convert,
+            target_bitrate: 320,
+            download_cover: args.image,
+        };
+
+        let pb = create_progress_bar(folders_to_process.len() as u64);
+
+        for folder in &folders_to_process {
+            pb.set_message(format!("Tagging {}", folder.rjcode));
+
+            let result_msg = match process_work_folder(db, folder, &tagger_config).await {
+                Ok(_) => format!("{} tagged ✓", folder.rjcode),
+                Err(e) => {
+                    warn!("Failed to tag {}: {}", folder.rjcode, e);
+                    format!("{} tag ✗", folder.rjcode)
+                }
+            };
+
+            pb.println(&result_msg);
+            pb.inc(1);
+        }
+
+        pb.finish_and_clear();
+    }
+
+    // Move folders to library and register in database
+    info!("\n--- Moving to library ---");
+    let pb = create_progress_bar(folders_to_process.len() as u64);
+    let mut success_count = 0;
+    let mut fail_count = 0;
+
+    for folder in &folders_to_process {
+        pb.set_message(format!("Moving {}", folder.rjcode));
+
+        let source = Path::new(&folder.path);
+        let folder_name = source.file_name()
+            .ok_or_else(|| format!("Invalid path: {}", folder.path))?;
+        let target = library_path_obj.join(folder_name);
+
+        match move_folder_cross_drive(source, &target) {
+            Ok(_) => {
+                // Register TARGET path in database
+                let target_path_str = target.to_string_lossy().to_string();
+                let mut registered_folder = folder.clone();
+                registered_folder.path = target_path_str;
+
+                if let Err(e) = register_folders(db, vec![registered_folder]) {
+                    warn!("Moved {} but failed to register in DB: {}", folder.rjcode, e);
+                    pb.println(&format!("{} ⚠ (DB error)", folder.rjcode));
+                    fail_count += 1;
+                } else {
+                    pb.println(&format!("{} ✓", folder.rjcode));
+                    success_count += 1;
+                }
+            }
+            Err(e) => {
+                warn!("Failed to move {}: {}", folder.rjcode, e);
+                pb.println(&format!("{} ✗", folder.rjcode));
+                fail_count += 1;
+            }
+        }
+
         pb.inc(1);
     }
 
     pb.finish_and_clear();
-    info!("Metadata fetch completed");
 
-    // Step 3: Download covers (using pre-filtered list from pre-VPN phase)
-    if !works_needing_covers.is_empty() {
-        step2_download_images_filtered(db, works_needing_covers).await?;
-    }
+    info!("\n=== IMPORT COMPLETE ===");
+    info!("Imported: {} | Failed: {}", success_count, fail_count);
 
-    info!("\n=== VPN PHASE COMPLETED ===");
-    info!("Tagging will be performed after VPN disconnects...");
     Ok(())
 }

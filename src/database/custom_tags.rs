@@ -30,6 +30,37 @@ pub fn list_all_dlsite_tags(conn: &Connection) -> Result<Vec<(i64, String, Optio
     Ok(tags)
 }
 
+/// List all DLSite tags with work counts (alphabetically sorted)
+/// Returns Vec<(tag_id, tag_name, custom_name_if_mapped, is_ignored, work_count)>
+pub fn list_all_dlsite_tags_with_counts(conn: &Connection) -> Result<Vec<(i64, String, Option<String>, bool, i64)>, HvtError> {
+    let mut stmt = conn.prepare(
+        &format!(
+            "SELECT dt.tag_id, dt.tag_name, ctm.custom_tag_name, COALESCE(ctm.is_ignored, 0),
+                    COUNT(lwt.fld_id) as work_count
+             FROM {DB_DLSITE_TAG_NAME} dt
+             LEFT JOIN {DB_CUSTOM_TAG_MAPPINGS_NAME} ctm ON dt.tag_id = ctm.dlsite_tag_id
+             LEFT JOIN {DB_LKP_WORK_TAG_NAME} lwt ON dt.tag_id = lwt.tag_id
+             GROUP BY dt.tag_id, dt.tag_name, ctm.custom_tag_name, ctm.is_ignored
+             ORDER BY dt.tag_name ASC"
+        )
+    )?;
+
+    let tags: Vec<(i64, String, Option<String>, bool, i64)> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get::<_, i64>(3)? != 0,
+                row.get(4)?,
+            ))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(tags)
+}
+
 /// Add or update a global custom tag mapping (rename)
 /// This applies to ALL works that have this DLSite tag
 pub fn add_custom_tag_mapping(

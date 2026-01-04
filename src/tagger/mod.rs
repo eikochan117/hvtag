@@ -112,18 +112,24 @@ pub async fn tag_audio_file(
 // Helper functions
 
 fn fetch_metadata_from_db(conn: &Connection, rjcode: &RJCode) -> Result<AudioMetadata, HvtError> {
-    // Query database for work metadata
+    // Query database for work metadata (with fallback to RJCode if not collected yet)
     let work_name: String = conn.query_row(
         "SELECT name FROM works WHERE fld_id = (SELECT fld_id FROM folders WHERE rjcode = ?1)",
         rusqlite::params![rjcode],
         |row| row.get(0),
-    ).map_err(|_| HvtError::Database(rusqlite::Error::QueryReturnedNoRows))?;
+    ).unwrap_or_else(|_| {
+        // Fallback: use RJCode as title if metadata not collected yet
+        debug!("No metadata found for {}, using RJCode as title", rjcode);
+        rjcode.to_string()
+    });
 
     // Get circle name (with custom preference support)
-    let circle_name = crate::database::custom_circles::get_merged_circle_name_for_work(conn, rjcode)?;
+    let circle_name = crate::database::custom_circles::get_merged_circle_name_for_work(conn, rjcode)
+        .unwrap_or_else(|_| String::from("Unknown"));
 
-    // Get tags (merged: DLSite + custom replacements)
-    let tags = crate::database::custom_tags::get_merged_tags_for_work(conn, rjcode)?;
+    // Get tags (merged: DLSite + custom replacements) - returns empty vec if none
+    let tags = crate::database::custom_tags::get_merged_tags_for_work(conn, rjcode)
+        .unwrap_or_default();
 
     // Get CVs (voice actors) - will be used as artists
     let mut cv_stmt = conn.prepare(
@@ -221,10 +227,29 @@ async fn tag_all_files(
         return Ok(());
     }
 
-    // STEP 2: Try to get saved parsing preference
+    // STEP 2: Check if files already have track numbers in their ID3 tags
+    let mut existing_track_count = 0;
+    for (file_path, _) in &audio_files {
+        if let Ok(Some(existing_metadata)) = id3_handler::read_id3_tags(file_path) {
+            if existing_metadata.track_number.is_some() {
+                existing_track_count += 1;
+            }
+        }
+    }
+
+    // If most files already have track numbers, skip interactive parsing
+    let existing_track_rate = existing_track_count as f32 / audio_files.len() as f32;
+    let files_already_numbered = existing_track_rate > 0.7; // 70% threshold
+
+    if files_already_numbered {
+        debug!("Files already have track numbers ({}/{}), skipping track parsing prompt",
+               existing_track_count, audio_files.len());
+    }
+
+    // STEP 3: Try to get saved parsing preference
     let parsing_pref = crate::database::queries::get_track_parsing_preference(conn, &folder.rjcode)?;
 
-    // STEP 3: Test if we can parse track numbers
+    // STEP 4: Test if we can parse track numbers from filenames
     let filenames: Vec<String> = audio_files.iter()
         .map(|(_, name)| name.clone())
         .collect();
@@ -232,8 +257,8 @@ async fn tag_all_files(
     let mut current_pref = parsing_pref;
     let mut need_user_input = false;
 
-    // If no saved preference, try automatic parsing
-    if current_pref.is_none() {
+    // Only check filename parsing if files don't already have track numbers
+    if !files_already_numbered && current_pref.is_none() {
         let parsed: Vec<Option<u32>> = filenames.iter()
             .map(|f| track_parser::parse_track_number(f))
             .collect();
@@ -247,7 +272,7 @@ async fn tag_all_files(
         }
     }
 
-    // STEP 4: Interactive prompt if needed
+    // STEP 5: Interactive prompt if needed (only if files don't already have track numbers)
     if need_user_input {
         info!("Automatic track parsing has low confidence, requesting user input...");
 

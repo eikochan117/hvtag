@@ -75,7 +75,7 @@ impl rusqlite::types::FromSql for RGCode {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ManagedFile {
     filename: String,
     extension: String,
@@ -102,7 +102,7 @@ impl ManagedFile {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ManagedFolder {
     pub is_valid: bool,
     pub is_tagged: bool,

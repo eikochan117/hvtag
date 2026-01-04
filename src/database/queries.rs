@@ -352,6 +352,26 @@ pub fn get_unscanned_works_with_paths(conn: &Connection) -> Result<Vec<(RJCode, 
     Ok(works)
 }
 
+/// Get cover link for a specific work
+pub fn get_cover_link(conn: &Connection, rjcode: &RJCode) -> Result<Option<String>, HvtError> {
+    let result = conn.query_row(
+        &format!(
+            "SELECT dc.link
+             FROM {DB_FOLDERS_NAME} f
+             INNER JOIN {DB_DLSITE_COVERS_LINK_NAME} dc ON f.fld_id = dc.fld_id
+             WHERE f.rjcode = ?1 AND dc.link IS NOT NULL"
+        ),
+        params![rjcode],
+        |row| row.get(0),
+    );
+
+    match result {
+        Ok(link) => Ok(Some(link)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// Get all works with cover links and their folder paths
 /// Returns Vec<(RJCode, folder_path, cover_url)>
 pub fn get_all_works_with_cover_links(conn: &Connection) -> Result<Vec<(RJCode, String, String)>, HvtError> {

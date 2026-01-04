@@ -27,6 +27,7 @@ regex = "1.0"
 dialoguer = "0.11"
 unicode-normalization = "0.1"
 indicatif = "0.17"
+dirs = "5.0"
 
 [build]
 jobs = 2

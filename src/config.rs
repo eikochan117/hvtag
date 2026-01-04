@@ -85,6 +85,17 @@ impl TaggerConfig {
     }
 }
 
+// ========== Import Configuration ==========
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct ImportConfig {
+    /// Source directory where new works are dropped for import
+    pub source_path: Option<String>,
+
+    /// Target library directory where works are moved after processing
+    pub library_path: Option<String>,
+}
+
 // ========== Root Configuration ==========
 
 /// Root configuration structure
@@ -95,6 +106,9 @@ pub struct Config {
 
     #[serde(default)]
     pub tagger: TaggerConfig,
+
+    #[serde(default)]
+    pub import: ImportConfig,
 }
 
 impl Default for Config {
@@ -102,17 +116,21 @@ impl Default for Config {
         Self {
             vpn: VpnConfig::default(),
             tagger: TaggerConfig::default(),
+            import: ImportConfig::default(),
         }
     }
 }
 
 impl Config {
     /// Load configuration from ~/.hvtag/config.toml
+    /// Creates a default config file if it doesn't exist
     pub fn load() -> Result<Self, HvtError> {
         let config_path = Self::get_config_path()?;
 
         if !config_path.exists() {
-            // No config file, return default
+            // Create default config file for new users
+            info!("No config file found, creating default at: {}", config_path.display());
+            Self::create_default_config(&config_path)?;
             return Ok(Self::default());
         }
 
@@ -125,45 +143,54 @@ impl Config {
         Ok(config)
     }
 
-    /// Get the path to the configuration file
-    fn get_config_path() -> Result<PathBuf, HvtError> {
-        let home = std::env::var("HOME")
-            .map_err(|_| HvtError::Generic("HOME environment variable not set".to_string()))?;
+    /// Create a default configuration file
+    fn create_default_config(config_path: &PathBuf) -> Result<(), HvtError> {
+        let default_config = Self::get_default_config_content();
 
-        let config_dir = PathBuf::from(home).join(".hvtag");
+        std::fs::write(config_path, default_config)
+            .map_err(|e| HvtError::Generic(format!("Failed to write default config: {}", e)))?;
 
-        // Create directory if it doesn't exist
-        if !config_dir.exists() {
-            std::fs::create_dir_all(&config_dir)
-                .map_err(|e| HvtError::Generic(format!("Failed to create config directory: {}", e)))?;
-        }
-
-        Ok(config_dir.join("config.toml"))
+        Ok(())
     }
 
-    /// Create a sample configuration file
-    pub fn create_sample() -> Result<(), HvtError> {
-        let config_path = Self::get_config_path()?;
+    /// Get the default configuration content with platform-specific paths
+    fn get_default_config_content() -> String {
+        let (wg_example, source_example, library_example) = if cfg!(target_os = "windows") {
+            (
+                "C:\\\\Users\\\\<username>\\\\.hvtag\\\\wireguard.conf",
+                "D:\\\\Downloads\\\\ASMR",
+                "E:\\\\Library\\\\ASMR",
+            )
+        } else {
+            (
+                "/home/<username>/.hvtag/wireguard.conf",
+                "/home/<username>/Downloads/ASMR",
+                "/home/<username>/Library/ASMR",
+            )
+        };
 
-        if config_path.exists() {
-            return Err(HvtError::Generic(format!(
-                "Config file already exists at {}",
-                config_path.display()
-            )));
-        }
+        format!(r#"# hvtag Configuration File
+# Edit this file to customize hvtag behavior
 
-        let sample = r#"# hvtag Configuration File
+[import]
+# Source directory: where new works are dropped for import
+# source_path = "{source_example}"
+
+# Library directory: where works are moved after processing
+# library_path = "{library_example}"
 
 [vpn]
-# Enable VPN functionality for metadata fetching
-enabled = true
+# Enable VPN functionality for metadata fetching from DLsite
+# Set to true if you need to access DLsite from a restricted region
+enabled = false
 provider = "wireguard"
 
 [vpn.wireguard]
-# Path to your WireGuard configuration file
-config_path = "/home/user/.hvtag/wg-japan.conf"
+# Path to your WireGuard configuration file (.conf)
+# Replace with your actual WireGuard config file path
+config_path = "{wg_example}"
 
-# Optional: custom interface name (defaults to config filename)
+# Optional: custom interface name (defaults to config filename without extension)
 # interface_name = "wg-hvtag"
 
 [tagger]
@@ -174,12 +201,23 @@ use_null_separator = false
 # Custom separator to use when use_null_separator is false
 # Common separators: "; " (default), " / ", ", ", " | "
 custom_separator = "; "
-"#;
-
-        std::fs::write(&config_path, sample)
-            .map_err(|e| HvtError::Generic(format!("Failed to write sample config: {}", e)))?;
-
-        info!("Sample config created at: {}", config_path.display());
-        Ok(())
+"#)
     }
+
+    /// Get the path to the configuration file
+    fn get_config_path() -> Result<PathBuf, HvtError> {
+        let home = dirs::home_dir()
+            .ok_or_else(|| HvtError::Generic("Could not determine home directory".to_string()))?;
+
+        let config_dir = home.join(".hvtag");
+
+        // Create directory if it doesn't exist
+        if !config_dir.exists() {
+            std::fs::create_dir_all(&config_dir)
+                .map_err(|e| HvtError::Generic(format!("Failed to create config directory: {}", e)))?;
+        }
+
+        Ok(config_dir.join("config.toml"))
+    }
+
 }
