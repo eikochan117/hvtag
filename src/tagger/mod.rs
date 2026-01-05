@@ -29,12 +29,16 @@ pub async fn process_work_folder(
     // Check if re-tagging needed (custom tags OR circle preferences modified)
     let needs_retag_tags = crate::database::custom_tags::should_retag_work(conn, &folder.rjcode).unwrap_or(false);
     let needs_retag_circle = crate::database::custom_circles::should_retag_work_for_circle(conn, &folder.rjcode).unwrap_or(false);
-    let needs_retag = needs_retag_tags || needs_retag_circle;
+    let needs_retag = needs_retag_tags || needs_retag_circle || config.force_retag;
 
     // Skip if already tagged and no re-tagging needed
     if folder.is_tagged && !needs_retag {
-        info!("Folder already tagged, skipping");
+        debug!("Folder already tagged, skipping (use --force to re-tag)");
         return Ok(());
+    }
+
+    if config.force_retag {
+        info!("Force re-tagging: {}", folder.rjcode.as_str());
     }
 
     if needs_retag_tags {
@@ -188,7 +192,39 @@ async fn tag_all_files(
 
     let folder_path = Path::new(&folder.path);
 
-    // STEP 1: Collect all MP3 files first
+    // STEP 0: Convert non-MP3 files if --convert is enabled
+    if config.convert_to_mp3 {
+        let entries = std::fs::read_dir(folder_path)?;
+        for entry in entries {
+            let entry = entry?;
+            let file_path = entry.path();
+
+            if !file_path.is_file() {
+                continue;
+            }
+
+            let extension = file_path.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+
+            let format = AudioFormat::from_extension(extension);
+
+            // Convert FLAC, WAV, OGG to MP3
+            if format == AudioFormat::Flac || format == AudioFormat::Wav || format == AudioFormat::Ogg {
+                let filename = file_path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                info!("Converting to MP3: {}", filename);
+
+                match converter::convert_to_mp3_in_place(&file_path, config.target_bitrate).await {
+                    Ok(_) => info!("Converted: {} -> .mp3", filename),
+                    Err(e) => warn!("Failed to convert {}: {}", filename, e),
+                }
+            }
+        }
+    }
+
+    // STEP 1: Collect all MP3 files
     let entries = std::fs::read_dir(folder_path)?;
     let mut audio_files: Vec<(PathBuf, String)> = Vec::new();
 
@@ -326,7 +362,10 @@ async fn tag_all_files(
         let mut file_metadata = base_metadata.clone();
         file_metadata.track_number = track_number;
 
-        debug!("Tagging: {} (track: {:?})", filename, track_number);
+        // Extract track title from filename (not album name!)
+        file_metadata.title = track_parser::extract_track_title(&filename);
+
+        debug!("Tagging: {} (track: {:?}, title: {})", filename, track_number, file_metadata.title);
 
         let format = AudioFormat::Mp3;
         tag_audio_file(&file_path, &file_metadata, &format, &config.tag_separator).await?;

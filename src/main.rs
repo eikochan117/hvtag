@@ -59,6 +59,10 @@ struct PrgmArgs {
     #[arg(long)]
     convert: bool,
 
+    /// Force re-tag all files (ignore already tagged status)
+    #[arg(long)]
+    force: bool,
+
     // ===== OTHER =====
     /// Interactive tag management
     #[arg(long)]
@@ -500,6 +504,7 @@ async fn step3_tag_files(
         target_bitrate: 320,
         download_cover: args.image,
         tag_separator: app_config.tagger.get_separator(),
+        force_retag: args.force,
     };
 
     // Get works to process with their paths
@@ -738,26 +743,37 @@ async fn run_import_workflow(
     // Download covers if requested
     if args.image {
         info!("\n--- Downloading covers ---");
-        let pb = create_progress_bar(folders_to_process.len() as u64);
 
-        for folder in &folders_to_process {
-            pb.set_message(format!("Cover {}", folder.rjcode));
+        // Filter folders that need covers (don't have folder.jpeg yet)
+        let folders_needing_covers: Vec<_> = folders_to_process.iter()
+            .filter(|f| !cover_art::has_cover_art(Path::new(&f.path)))
+            .collect();
 
-            // Get cover URL from database
-            if let Ok(Some(cover_url)) = queries::get_cover_link(db, &folder.rjcode) {
-                match cover_art::download_cover_to_cache(&cover_url, &folder.rjcode.to_string(), Some((500, 500))).await {
-                    Ok(_) => pb.println(&format!("{} cover ✓", folder.rjcode)),
-                    Err(e) => {
-                        warn!("Failed to download cover for {}: {}", folder.rjcode, e);
-                        pb.println(&format!("{} cover ✗", folder.rjcode));
+        if folders_needing_covers.is_empty() {
+            info!("All folders already have covers, skipping download");
+        } else {
+            info!("{} folder(s) need covers", folders_needing_covers.len());
+            let pb = create_progress_bar(folders_needing_covers.len() as u64);
+
+            for folder in &folders_needing_covers {
+                pb.set_message(format!("Cover {}", folder.rjcode));
+
+                // Get cover URL from database
+                if let Ok(Some(cover_url)) = queries::get_cover_link(db, &folder.rjcode) {
+                    match cover_art::download_cover_to_cache(&cover_url, &folder.rjcode.to_string(), Some((500, 500))).await {
+                        Ok(_) => pb.println(&format!("{} cover ✓", folder.rjcode)),
+                        Err(e) => {
+                            warn!("Failed to download cover for {}: {}", folder.rjcode, e);
+                            pb.println(&format!("{} cover ✗", folder.rjcode));
+                        }
                     }
                 }
+
+                pb.inc(1);
             }
 
-            pb.inc(1);
+            pb.finish_and_clear();
         }
-
-        pb.finish_and_clear();
     }
 
     // Disconnect VPN before filesystem operations
@@ -765,11 +781,18 @@ async fn run_import_workflow(
 
     // ========== POST-VPN PHASE ==========
 
-    // Copy covers from cache to source folders
+    // Copy covers from cache to source folders (only for folders that don't have covers)
     if args.image {
         info!("\n--- Copying covers to folders ---");
         for folder in &folders_to_process {
             let folder_path = Path::new(&folder.path);
+
+            // Skip if folder already has a cover
+            if cover_art::has_cover_art(folder_path) {
+                debug!("Skipping {}: already has cover", folder.rjcode);
+                continue;
+            }
+
             if let Err(e) = cover_art::copy_cover_from_cache(&folder.rjcode.to_string(), folder_path) {
                 debug!("No cached cover for {}: {}", folder.rjcode, e);
             }
@@ -784,6 +807,7 @@ async fn run_import_workflow(
             convert_to_mp3: args.convert,
             target_bitrate: 320,
             download_cover: args.image,
+            force_retag: args.force,
         };
 
         let pb = create_progress_bar(folders_to_process.len() as u64);

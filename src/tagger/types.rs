@@ -101,6 +101,7 @@ pub struct TaggerConfig {
     pub target_bitrate: u32,
     pub download_cover: bool,
     pub tag_separator: String,
+    pub force_retag: bool,
 }
 
 impl Default for TaggerConfig {
@@ -110,6 +111,7 @@ impl Default for TaggerConfig {
             target_bitrate: 320,
             tag_separator: "; ".to_string(),
             download_cover: true,
+            force_retag: false,
         }
     }
 }

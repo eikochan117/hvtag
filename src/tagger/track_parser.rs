@@ -248,6 +248,74 @@ pub fn parse_track_number(filename: &str) -> Option<u32> {
     None
 }
 
+/// Extracts a clean track title from a filename
+/// Removes: extension, track number prefixes, common separators
+/// Example: "01 - My Track Title.mp3" → "My Track Title"
+/// Example: "【01】耳かき.mp3" → "耳かき"
+pub fn extract_track_title(filename: &str) -> String {
+    // Remove extension
+    let name_without_ext = filename
+        .rsplit_once('.')
+        .map(|(name, _)| name)
+        .unwrap_or(filename);
+
+    let mut title = name_without_ext.to_string();
+
+    // Normalize Asian text for pattern matching
+    let normalized = normalize_asian_text(&title);
+
+    // Remove track number prefixes - order matters (most specific first)
+    let patterns_to_remove = [
+        // Asian bracket patterns
+        r"^【\d{1,3}】[\s\-._]*",
+        r"^［\d{1,3}］[\s\-._]*",
+        r"^〔\d{1,3}〕[\s\-._]*",
+        r"^〈\d{1,3}〉[\s\-._]*",
+        r"^《\d{1,3}》[\s\-._]*",
+        r"^（\d{1,3}）[\s\-._]*",
+        // Kanji episode markers
+        r"^第\d{1,3}[話章回集][\s\-._]*",
+        // Disc patterns (disc1-01, cd2-05)
+        r"^(?i)(?:disc|cd)[\s\-._]?\d{1,3}[\s\-._]\d{1,3}[\s\-._]*",
+        // Common prefix patterns (tr01, tk05, track03)
+        r"^(?i)(?:tr|tk|track|ch|se|bgm)\d{1,3}[\s\-._]+",
+        // Hash pattern (#3-A)
+        r"^#\d{1,3}[\s\-._A-Za-z]*[\s\-._]+",
+        // Standard number prefix (01 - , 01. , 01_ )
+        r"^\d{1,3}[\s\-._]+",
+    ];
+
+    // Try to match and remove patterns from the normalized version
+    // but apply to original if matched
+    for pattern_str in &patterns_to_remove {
+        if let Ok(pattern) = Regex::new(pattern_str) {
+            // Check if pattern matches normalized version
+            if pattern.is_match(&normalized) {
+                // Apply removal to original title
+                title = pattern.replace(&title, "").to_string();
+                break; // Only remove one prefix
+            }
+            // Also try on original (for patterns that don't need normalization)
+            if pattern.is_match(&title) {
+                title = pattern.replace(&title, "").to_string();
+                break;
+            }
+        }
+    }
+
+    // Clean up: trim whitespace and common separators at start/end
+    title = title.trim().to_string();
+    title = title.trim_start_matches(|c| c == '-' || c == '_' || c == '.').to_string();
+    title = title.trim().to_string();
+
+    // If title is empty after cleanup, use original filename without extension
+    if title.is_empty() {
+        title = name_without_ext.to_string();
+    }
+
+    title
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
