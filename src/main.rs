@@ -8,7 +8,7 @@ use crate::{
     database::{db_loader::open_db, init, queries},
     dlsite::{assign_data_to_work_with_client, DataSelection},
     folders::{get_list_of_folders, get_list_of_unscanned_works, register_folders, types::{ManagedFolder, RJCode}},
-    tagger::{cover_art, process_work_folder, types::TaggerConfig},
+    tagger::{cover_art, converter, process_work_folder, types::TaggerConfig},
     vpn::WireGuardManager,
     config::{Config, VpnProvider},
 };
@@ -259,11 +259,17 @@ async fn run_standalone_workflow(
         manager.disconnect()?;
     }
 
+    // --convert (standalone): Convert non-MP3 files to MP3 without tagging
+    // When combined with --tag, this runs first so the tag pipeline finds only MP3s
+    if args.convert {
+        step_convert_files(db).await?;
+    }
+
     // --tag / --apply: Tag files for works in database
     if args.tag || args.apply {
         // First copy cached covers to folders
         step_copy_cached_covers(&all_works_with_covers)?;
-        // Then tag
+        // Then tag (convert_to_mp3 in TaggerConfig will be a no-op if --convert already ran)
         step3_tag_files(db, args, app_config).await?;
     }
 
@@ -490,6 +496,106 @@ fn step_copy_cached_covers(
     Ok(())
 }
 
+/// Convert non-MP3 audio files (FLAC, WAV, OGG) to MP3 for all works in database
+async fn step_convert_files(
+    db: &rusqlite::Connection,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!("=== CONVERTING AUDIO FILES TO MP3 ===");
+
+    if !converter::is_ffmpeg_available() {
+        error!("FFmpeg not found in PATH. Please install FFmpeg to use --convert.");
+        return Err(Box::new(errors::HvtError::AudioConversion(
+            "FFmpeg not found in PATH. Please install FFmpeg: https://ffmpeg.org/".to_string(),
+        )));
+    }
+
+    let target_bitrate: u32 = 320;
+    let non_mp3_ext = ["flac", "wav", "ogg"];
+
+    let works_with_paths = queries::get_all_works_with_paths(db)?;
+
+    if works_with_paths.is_empty() {
+        info!("No works in database");
+        return Ok(());
+    }
+
+    // Pre-scan: collect only works that have non-MP3 files
+    let mut works_to_convert: Vec<(RJCode, Vec<std::path::PathBuf>)> = Vec::new();
+
+    for (rjcode, folder_path) in &works_with_paths {
+        let folder = std::path::Path::new(folder_path);
+        if !folder.exists() {
+            continue;
+        }
+        let mut files: Vec<std::path::PathBuf> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(folder) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                let ext = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                if non_mp3_ext.contains(&ext.as_str()) {
+                    files.push(path);
+                }
+            }
+        }
+        if !files.is_empty() {
+            works_to_convert.push((rjcode.clone(), files));
+        }
+    }
+
+    if works_to_convert.is_empty() {
+        info!("No non-MP3 files found, nothing to convert");
+        return Ok(());
+    }
+
+    let total_files: usize = works_to_convert.iter().map(|(_, f)| f.len()).sum();
+    info!(
+        "Found {} work(s) with {} file(s) to convert",
+        works_to_convert.len(),
+        total_files
+    );
+
+    let pb = create_progress_bar(total_files as u64);
+    let mut converted = 0usize;
+    let mut failed = 0usize;
+
+    for (rjcode, files) in &works_to_convert {
+        for file_path in files {
+            let filename = file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            pb.set_message(format!("{} — {}", rjcode, filename));
+
+            match converter::convert_to_mp3_in_place(file_path, target_bitrate).await {
+                Ok(_) => {
+                    pb.println(format!("{}/{} ✓", rjcode, filename));
+                    converted += 1;
+                }
+                Err(e) => {
+                    warn!("Failed to convert {}/{}: {}", rjcode, filename, e);
+                    pb.println(format!("{}/{} ✗", rjcode, filename));
+                    failed += 1;
+                }
+            }
+
+            pb.inc(1);
+        }
+    }
+
+    pb.finish_and_clear();
+    info!("Converted: {} | Failed: {}", converted, failed);
+
+    Ok(())
+}
+
 /// Step 3: Tag and convert audio files
 async fn step3_tag_files(
     db: &rusqlite::Connection,
@@ -513,8 +619,27 @@ async fn step3_tag_files(
         let path = std::env::current_dir()?.to_string_lossy().to_string();
         vec![(RJCode::new(rjcode.clone())?, path)]
     } else {
-        // Get all works from DB with their stored paths
+        // Pre-filter: only works that actually need tagging, so the progress bar
+        // reflects real work to do rather than the full DB size.
         queries::get_all_works_with_paths(db)?
+            .into_iter()
+            .filter(|(rjcode, path)| {
+                if tagger_config.force_retag {
+                    return true;
+                }
+                let folder = ManagedFolder::new(path.clone());
+                if !folder.is_tagged {
+                    return true;
+                }
+                let needs_retag_tags =
+                    crate::database::custom_tags::should_retag_work(db, rjcode)
+                        .unwrap_or(false);
+                let needs_retag_circle =
+                    crate::database::custom_circles::should_retag_work_for_circle(db, rjcode)
+                        .unwrap_or(false);
+                needs_retag_tags || needs_retag_circle
+            })
+            .collect()
     };
 
     info!("Processing {} work(s)", works_with_paths.len());

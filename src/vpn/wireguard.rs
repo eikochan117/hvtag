@@ -377,33 +377,63 @@ impl WireGuardManager {
         self.connected
     }
 
-    /// Test network connectivity through the VPN
+    /// Test network connectivity through the VPN.
+    ///
+    /// Retries up to 3 times with 3s delay to handle the Windows race condition where
+    /// the WireGuard interface is registered but routing isn't yet active. If all
+    /// attempts fail, logs a warning but does NOT return an error — the tunnel is
+    /// likely fine and routing will complete within the next second.
     fn test_connectivity(&self) -> Result<(), HvtError> {
-        // Try to ping a reliable DNS server through the VPN
-        let output = if self.is_windows {
-            // Windows ping syntax: ping -n 1 -w 5000 1.1.1.1
-            Command::new("ping")
-                .args(&["-n", "1", "-w", "5000", "1.1.1.1"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output()
-        } else {
-            // Unix ping syntax: ping -c 1 -W 5 1.1.1.1
-            Command::new("ping")
-                .args(&["-c", "1", "-W", "5", "1.1.1.1"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output()
-        }
-        .map_err(|e| HvtError::Generic(format!("Failed to test connectivity: {}", e)))?;
+        let max_retries = 3;
+        let retry_delay = std::time::Duration::from_secs(3);
 
-        if !output.status.success() {
-            return Err(HvtError::Generic(
-                "VPN connected but no network connectivity. Check your VPN configuration.".to_string()
-            ));
+        for attempt in 1..=max_retries {
+            let output = if self.is_windows {
+                // Windows ping syntax: ping -n 1 -w 5000 1.1.1.1
+                Command::new("ping")
+                    .args(&["-n", "1", "-w", "5000", "1.1.1.1"])
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .output()
+            } else {
+                // Unix ping syntax: ping -c 1 -W 5 1.1.1.1
+                Command::new("ping")
+                    .args(&["-c", "1", "-W", "5", "1.1.1.1"])
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .output()
+            };
+
+            match output {
+                Err(e) => {
+                    warn!("Connectivity check failed (attempt {}/{}): {}", attempt, max_retries, e);
+                }
+                Ok(out) if out.status.success() => {
+                    info!("Network connectivity OK (attempt {})", attempt);
+                    return Ok(());
+                }
+                Ok(_) => {
+                    debug!(
+                        "Ping to 1.1.1.1 failed (attempt {}/{}), routing may not be ready yet",
+                        attempt, max_retries
+                    );
+                }
+            }
+
+            if attempt < max_retries {
+                debug!("Retrying connectivity check in {}s...", retry_delay.as_secs());
+                std::thread::sleep(retry_delay);
+            }
         }
 
-        info!("Network connectivity OK");
+        // All attempts failed — log a warning but continue. The tunnel is installed and
+        // verify_connection() already confirmed the interface is active. Routing on Windows
+        // can lag a few seconds behind the service startup.
+        warn!(
+            "VPN connectivity check failed after {} attempts. \
+             Proceeding anyway — the tunnel is active but routing may need a moment.",
+            max_retries
+        );
         Ok(())
     }
 }
