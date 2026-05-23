@@ -1,7 +1,7 @@
 use std::error::Error;
 use tracing::debug;
 
-use crate::{folders::types::RGCode, tagger::types::{AgeCategory, WorkDetails}};
+use crate::{folders::types::{RGCode, RJCode}, tagger::types::{AgeCategory, WorkDetails}};
 
 impl WorkDetails {
     pub async fn build_from_rjcode(rjcode: String) -> Result<Self, Box<dyn Error>> {
@@ -12,7 +12,9 @@ impl WorkDetails {
         rjcode: String,
         client: Option<&reqwest::Client>,
     ) -> Result<Self, Box<dyn Error>> {
-        let url = format!("https://www.dlsite.com/maniax/product/info/ajax?product_id={rjcode}");
+        let code = RJCode::from_string_unchecked(rjcode.clone());
+        let section = code.site_section();
+        let url = format!("https://www.dlsite.com/{section}/product/info/ajax?product_id={rjcode}");
         debug!("Querying DLSite API: {url}");
 
         let resp = if let Some(client) = client {

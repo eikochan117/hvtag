@@ -8,10 +8,10 @@ pub struct RJCode(String);
 
 impl RJCode {
     pub fn new(s: String) -> Result<Self, HvtError> {
-        if s.starts_with("RJ") && s.len() >= 6 {
+        if (s.starts_with("RJ") || s.starts_with("VJ")) && s.len() >= 6 {
             Ok(RJCode(s))
         } else {
-            Err(HvtError::Parse(format!("Invalid RJCode format: {}", s)))
+            Err(HvtError::Parse(format!("Invalid work code format (expected RJxxxxxx or VJxxxxxx): {}", s)))
         }
     }
 
@@ -19,7 +19,11 @@ impl RJCode {
         &self.0
     }
 
-    // Internal constructor without validation (for when RJ code already validated)
+    /// Returns the DLsite site section for this code ("maniax" for RJ, "pro" for VJ).
+    pub fn site_section(&self) -> &'static str {
+        if self.0.starts_with("VJ") { "pro" } else { "maniax" }
+    }
+
     pub(crate) fn from_string_unchecked(s: String) -> Self {
         RJCode(s)
     }
@@ -174,8 +178,8 @@ impl ManagedFolder {
             .map(|s| s.to_string())
             .unwrap_or_else(|| String::from(""));
 
-        // Folder is valid if it has RJ prefix and contains audio files (even in subdirectories)
-        let is_valid = has_audio_files && rjcode_str.starts_with("RJ");
+        // Folder is valid if it has RJ/VJ prefix and contains audio files (even in subdirectories)
+        let is_valid = has_audio_files && (rjcode_str.starts_with("RJ") || rjcode_str.starts_with("VJ"));
 
         ManagedFolder {
             is_valid,

@@ -1,7 +1,7 @@
 use reqwest::Url;
 use scraper::{ElementRef, Html, Selector};
 use tracing::warn;
-use crate::errors::HvtError;
+use crate::{errors::HvtError, folders::types::RJCode};
 
 #[derive(Debug)]
 pub struct DlSiteProductScrapResult {
@@ -64,7 +64,9 @@ impl DlSiteProductScrapResult {
         rjcode: String,
         client: Option<&reqwest::Client>,
     ) -> Result<DlSiteProductScrapResult, HvtError> {
-        let url_str = format!("https://www.dlsite.com/maniax/work/=/product_id/{rjcode}.html");
+        let code = RJCode::from_string_unchecked(rjcode.clone());
+        let section = code.site_section();
+        let url_str = format!("https://www.dlsite.com/{section}/work/=/product_id/{rjcode}.html");
         let url = url_str.parse::<Url>()
             .map_err(|e| HvtError::Http(format!("Invalid URL: {}", e)))?;
 
@@ -147,16 +149,18 @@ fn parse_circle_name_from_title(title: &str) -> String {
     name.trim().to_string()
 }
 
-/// Scrape circle names from circle profile page TITLE
-/// URL: https://www.dlsite.com/maniax/circle/profile/=/maker_id/<RG Code>.html
-/// Makes 2 requests with different locales to get both EN and JP names
+/// Scrape circle names from circle profile page TITLE.
+/// Makes 2 requests with different locales to get both EN and JP names.
 ///
+/// `section` should be `"maniax"` (RJ works) or `"pro"` (VJ works).
 /// Returns (name_en, name_jp)
 pub async fn scrape_circle_profile(
     rgcode: &str,
+    section: &str,
     client: Option<&reqwest::Client>,
 ) -> Result<(String, String), HvtError> {
-    let url_str = format!("https://www.dlsite.com/maniax/circle/profile/=/maker_id/{}.html", rgcode);
+    let subpath = if section == "pro" { "maker/profile" } else { "circle/profile" };
+    let url_str = format!("https://www.dlsite.com/{section}/{subpath}/=/maker_id/{rgcode}.html");
     let url = url_str.parse::<Url>()
         .map_err(|e| HvtError::Http(format!("Invalid URL: {}", e)))?;
 

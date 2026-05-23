@@ -85,6 +85,7 @@ pub async fn assign_data_to_work_with_client(
             // Scrape circle names from circle profile page title
             let (circle_name_en, circle_name_jp) = match scrapper::scrape_circle_profile(
                 wd.maker_code.as_str(),
+                work.site_section(),
                 client,
             ).await {
                 Ok((en, jp)) => (en, jp),

@@ -34,7 +34,7 @@ struct PrgmArgs {
     #[arg(long)]
     scan: bool,
 
-    /// Specific RJCode to process
+    /// Specific work code to process (RJxxxxxx or VJxxxxxx)
     #[arg(long)]
     rjcode: Option<String>,
 
