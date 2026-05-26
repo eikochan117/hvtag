@@ -63,6 +63,11 @@ struct PrgmArgs {
     #[arg(long)]
     force: bool,
 
+    // ===== COMBINED WORKFLOWS =====
+    /// Full pipeline: import + collect + image + tag (equivalent to --import --collect --image --tag)
+    #[arg(long)]
+    full: bool,
+
     // ===== OTHER =====
     /// Interactive tag management
     #[arg(long)]
@@ -84,9 +89,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let args = PrgmArgs::parse();
+    let mut args = PrgmArgs::parse();
     let db = open_db(None)?;
     init(&db)?;
+
+    // --full is a shortcut for --import --collect --image --tag
+    if args.full {
+        args.import = true;
+        args.collect = true;
+        args.image = true;
+        args.tag = true;
+    }
 
     // Handle tag management (early exit if specified)
     if args.manage_tags {
