@@ -8,7 +8,7 @@ use crate::{
     database::{db_loader::open_db, init, queries},
     dlsite::{assign_data_to_work_with_client, DataSelection},
     folders::{get_list_of_folders, get_list_of_unscanned_works, register_folders, types::{ManagedFolder, RJCode}},
-    tagger::{cover_art, converter, process_work_folder, types::TaggerConfig},
+    tagger::{cover_art, converter, folder_normalizer, process_work_folder, types::TaggerConfig},
     vpn::WireGuardManager,
     config::{Config, VpnProvider},
 };
@@ -766,7 +766,15 @@ async fn run_import_workflow(
     info!("Library: {}", library_path);
 
     // ========== PRE-VPN PHASE ==========
-    // 1. Scan source directory
+    // 1. Prepare source folders: rename non-RJ roots and flatten audio files
+    info!("\n--- Preparing source folders ---");
+    match folder_normalizer::prepare_source_directory(source_path) {
+        Ok(0) => debug!("All source folders already normalized"),
+        Ok(n) => info!("Prepared {} folder(s)", n),
+        Err(e) => warn!("Folder preparation encountered an error: {}", e),
+    }
+
+    // 2. Scan source directory
     info!("\n--- Scanning source directory ---");
     let source_folders = get_list_of_folders(source_path)?;
 
@@ -804,6 +812,15 @@ async fn run_import_workflow(
     }
 
     info!("{} folder(s) to process", folders_to_process.len());
+
+    // Register folders in DB now (with source path) so that --collect and --tag can resolve
+    // fld_id during this same run. The path will be updated to the library path after the move.
+    info!("\n--- Registering folders in database ---");
+    for folder in &folders_to_process {
+        if let Err(e) = register_folders(db, vec![folder.clone()]) {
+            warn!("Failed to register {} in DB: {}", folder.rjcode, e);
+        }
+    }
 
     // Check if we need VPN
     let needs_vpn = args.collect || args.image;
@@ -984,14 +1001,11 @@ async fn run_import_workflow(
 
         match move_folder_cross_drive(source, &target) {
             Ok(_) => {
-                // Register TARGET path in database
+                // Update path to final library location (folder was already registered earlier)
                 let target_path_str = target.to_string_lossy().to_string();
-                let mut registered_folder = folder.clone();
-                registered_folder.path = target_path_str;
-
-                if let Err(e) = register_folders(db, vec![registered_folder]) {
-                    warn!("Moved {} but failed to register in DB: {}", folder.rjcode, e);
-                    pb.println(&format!("{} ⚠ (DB error)", folder.rjcode));
+                if let Err(e) = queries::update_folder_path(db, &folder.rjcode, &target_path_str) {
+                    warn!("Moved {} but failed to update path in DB: {}", folder.rjcode, e);
+                    pb.println(&format!("{} ⚠ (DB path error)", folder.rjcode));
                     fail_count += 1;
                 } else {
                     pb.println(&format!("{} ✓", folder.rjcode));
