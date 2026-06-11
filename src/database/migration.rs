@@ -6,6 +6,7 @@ use crate::errors::HvtError;
 pub fn migrate_schema(conn: &Connection) -> Result<(), HvtError> {
     migrate_folders_table(conn)?;
     migrate_dlsite_errors_table(conn)?;
+    migrate_track_parsing_prefs_table(conn)?;
     Ok(())
 }
 
@@ -78,6 +79,22 @@ fn migrate_dlsite_errors_table(conn: &Connection) -> Result<(), HvtError> {
         )?;
         conn.execute(
             "ALTER TABLE dlsite_errors ADD COLUMN resolved_date TIMESTAMP",
+            [],
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Adds strip_prefix_pattern column to track_parsing_preferences
+fn migrate_track_parsing_prefs_table(conn: &Connection) -> Result<(), HvtError> {
+    let needs_migration = conn
+        .prepare("SELECT strip_prefix_pattern FROM track_parsing_preferences LIMIT 1")
+        .is_err();
+
+    if needs_migration {
+        conn.execute(
+            "ALTER TABLE track_parsing_preferences ADD COLUMN strip_prefix_pattern TEXT",
             [],
         )?;
     }

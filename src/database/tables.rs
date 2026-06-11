@@ -156,6 +156,7 @@ pub const DB_TRACK_PARSING_PREFS_COLS: &str = "pref_id INTEGER PRIMARY KEY AUTOI
     custom_delimiter TEXT, \
     use_asian_conversion BOOLEAN DEFAULT 0, \
     asian_format_type TEXT, \
+    strip_prefix_pattern TEXT, \
     created_at TEXT DEFAULT (datetime('now')), \
     last_used TEXT DEFAULT (datetime('now')), \
     FOREIGN KEY (fld_id) REFERENCES folders(fld_id) ON DELETE CASCADE";

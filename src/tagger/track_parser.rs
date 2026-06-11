@@ -8,6 +8,9 @@ pub struct TrackParsingPreference {
     pub custom_delimiter: Option<String>,
     pub use_asian_conversion: bool,
     pub asian_format_type: Option<String>,
+    /// Regex pattern to strip from the filename before looking for the first number.
+    /// Supports non-greedy quantifiers (e.g. `s.*?_` strips `s19_` from `s19_01_track`).
+    pub strip_prefix_pattern: Option<String>,
 }
 
 /// Converts full-width numbers and characters to ASCII using NFKC normalization
@@ -118,6 +121,26 @@ fn try_strategy(filename: &str, pref: &TrackParsingPreference) -> Option<u32> {
                             if let Ok(num) = num_str.as_str().parse::<u32>() {
                                 if num > 0 && num < 1000 {
                                     return Some(num);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
+        "strip_prefix" => {
+            if let Some(ref pattern_str) = pref.strip_prefix_pattern {
+                if let Ok(re) = Regex::new(pattern_str) {
+                    // Remove first match of the pattern, then find the first number
+                    let stripped = re.replacen(name_without_ext, 1, "");
+                    if let Ok(num_re) = Regex::new(r"(\d{1,3})") {
+                        if let Some(caps) = num_re.captures(&stripped) {
+                            if let Some(num_str) = caps.get(1) {
+                                if let Ok(num) = num_str.as_str().parse::<u32>() {
+                                    if num > 0 && num < 1000 {
+                                        return Some(num);
+                                    }
                                 }
                             }
                         }

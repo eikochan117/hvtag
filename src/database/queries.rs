@@ -398,7 +398,8 @@ pub fn get_track_parsing_preference(
 ) -> Result<Option<TrackParsingPreference>, HvtError> {
     let result = conn.query_row(
         &format!(
-            "SELECT strategy_name, custom_delimiter, use_asian_conversion, asian_format_type
+            "SELECT strategy_name, custom_delimiter, use_asian_conversion, asian_format_type,
+                    strip_prefix_pattern
              FROM {DB_TRACK_PARSING_PREFS_NAME}
              WHERE fld_id = (SELECT fld_id FROM {DB_FOLDERS_NAME} WHERE rjcode = ?1)"
         ),
@@ -409,6 +410,7 @@ pub fn get_track_parsing_preference(
                 custom_delimiter: row.get(1)?,
                 use_asian_conversion: row.get::<_, i64>(2)? != 0,
                 asian_format_type: row.get(3)?,
+                strip_prefix_pattern: row.get(4)?,
             })
         },
     );
@@ -429,10 +431,11 @@ pub fn save_track_parsing_preference(
     conn.execute(
         &format!(
             "INSERT OR REPLACE INTO {DB_TRACK_PARSING_PREFS_NAME}
-             (fld_id, strategy_name, custom_delimiter, use_asian_conversion, asian_format_type, last_used)
+             (fld_id, strategy_name, custom_delimiter, use_asian_conversion, asian_format_type,
+              strip_prefix_pattern, last_used)
              VALUES (
                  (SELECT fld_id FROM {DB_FOLDERS_NAME} WHERE rjcode = ?1),
-                 ?2, ?3, ?4, ?5, datetime('now')
+                 ?2, ?3, ?4, ?5, ?6, datetime('now')
              )"
         ),
         params![
@@ -441,6 +444,7 @@ pub fn save_track_parsing_preference(
             &preference.custom_delimiter,
             preference.use_asian_conversion,
             &preference.asian_format_type,
+            &preference.strip_prefix_pattern,
         ],
     )?;
 

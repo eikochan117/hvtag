@@ -1,4 +1,5 @@
 use dialoguer::{Select, Input, theme::ColorfulTheme};
+use regex::Regex;
 use crate::errors::HvtError;
 use crate::tagger::track_parser::{TrackParsingPreference, parse_track_number_with_preference};
 
@@ -74,7 +75,8 @@ fn pick_strategy() -> Result<StrategyChoice, HvtError> {
         "Asian full-width numbers  (０１２ → 012)",
         "Asian brackets            【01】 ［01］ 〔01〕 （01）",
         "Kanji episode markers     第01話  第01章  第01回",
-        "Custom delimiter          (specify a pattern)",
+        "Custom delimiter          (number followed by a pattern)",
+        "Strip prefix then first number  (regex, e.g. s.*?_ strips s19_ from s19_01_track)",
         "First number in filename  (fallback)",
         "Manual numbering          (enter each track number by hand)",
         "Skip this folder          (no track numbers)",
@@ -93,18 +95,21 @@ fn pick_strategy() -> Result<StrategyChoice, HvtError> {
             custom_delimiter: None,
             use_asian_conversion: true,
             asian_format_type: Some("fullwidth".to_string()),
+            strip_prefix_pattern: None,
         })),
         1 => Ok(StrategyChoice::Preference(TrackParsingPreference {
             strategy_name: "asian_brackets".to_string(),
             custom_delimiter: None,
             use_asian_conversion: true,
             asian_format_type: Some("asian_brackets".to_string()),
+            strip_prefix_pattern: None,
         })),
         2 => Ok(StrategyChoice::Preference(TrackParsingPreference {
             strategy_name: "asian_kanji_episode".to_string(),
             custom_delimiter: None,
             use_asian_conversion: true,
             asian_format_type: Some("kanji_episode".to_string()),
+            strip_prefix_pattern: None,
         })),
         3 => {
             let delimiter: String = Input::with_theme(&ColorfulTheme::default())
@@ -116,16 +121,52 @@ fn pick_strategy() -> Result<StrategyChoice, HvtError> {
                 custom_delimiter: Some(delimiter),
                 use_asian_conversion: false,
                 asian_format_type: None,
+                strip_prefix_pattern: None,
             }))
         }
-        4 => Ok(StrategyChoice::Preference(TrackParsingPreference {
+        4 => {
+            println!("\nRegex pattern to remove from the start of the filename before");
+            println!("looking for the first number.");
+            println!("Examples:");
+            println!("  s.*?_     strips 's19_' from 's19_01_track'");
+            println!("  ^\\[.*?\\]\\s*  strips '[se01] ' from '[se01] track name'");
+            println!("  (?i)vol\\d+_  strips 'vol3_' (case-insensitive)");
+            println!();
+            let pattern: String = Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Regex pattern to strip")
+                .interact_text()
+                .map_err(|e| HvtError::Parse(format!("Input error: {}", e)))?;
+
+            // Validate the regex before accepting it
+            match Regex::new(&pattern) {
+                Ok(_) => Ok(StrategyChoice::Preference(TrackParsingPreference {
+                    strategy_name: "strip_prefix".to_string(),
+                    custom_delimiter: None,
+                    use_asian_conversion: false,
+                    asian_format_type: None,
+                    strip_prefix_pattern: Some(pattern),
+                })),
+                Err(e) => {
+                    println!("Invalid regex: {}. Falling back to first-number strategy.", e);
+                    Ok(StrategyChoice::Preference(TrackParsingPreference {
+                        strategy_name: "first_number".to_string(),
+                        custom_delimiter: None,
+                        use_asian_conversion: false,
+                        asian_format_type: None,
+                        strip_prefix_pattern: None,
+                    }))
+                }
+            }
+        }
+        5 => Ok(StrategyChoice::Preference(TrackParsingPreference {
             strategy_name: "first_number".to_string(),
             custom_delimiter: None,
             use_asian_conversion: false,
             asian_format_type: None,
+            strip_prefix_pattern: None,
         })),
-        5 => Ok(StrategyChoice::Manual),
-        6 => Ok(StrategyChoice::Skip),
+        6 => Ok(StrategyChoice::Manual),
+        7 => Ok(StrategyChoice::Skip),
         _ => unreachable!(),
     }
 }
