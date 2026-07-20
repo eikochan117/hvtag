@@ -49,7 +49,7 @@ pub fn write_id3_tags(file_path: &Path, metadata: &AudioMetadata, separator: &st
 }
 
 /// Reads ID3v2 tags from an MP3 file
-pub fn read_id3_tags(file_path: &Path) -> Result<Option<AudioMetadata>, HvtError> {
+pub fn read_id3_tags(file_path: &Path, separator: &str) -> Result<Option<AudioMetadata>, HvtError> {
     let tag = match id3::Tag::read_from_path(file_path) {
         Ok(t) => t,
         Err(_) => return Ok(None),
@@ -62,10 +62,13 @@ pub fn read_id3_tags(file_path: &Path) -> Result<Option<AudioMetadata>, HvtError
         .map(|s| s.to_string())
         .collect();
 
-    // Parse artists (separated by semicolon)
+    // Parse artists using the same separator used to write them (write_id3_tags joins
+    // with the configured tag_separator, which may be "; ", "\0", or something else —
+    // this used to be hardcoded to ';', which silently misparsed multi-artist tags
+    // whenever a non-default separator was configured).
     let artists_str = tag.artist().unwrap_or("");
     let artists: Vec<String> = if !artists_str.is_empty() {
-        artists_str.split(';').map(|s| s.trim().to_string()).collect()
+        artists_str.split(separator).map(|s| s.trim().to_string()).collect()
     } else {
         Vec::new()
     };

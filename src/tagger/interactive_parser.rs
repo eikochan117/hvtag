@@ -1,7 +1,7 @@
 use dialoguer::{Select, Input, theme::ColorfulTheme};
 use regex::Regex;
 use crate::errors::HvtError;
-use crate::tagger::track_parser::{TrackParsingPreference, parse_track_number_with_preference};
+use crate::tagger::track_parser::{TrackParsingPreference, parse_track_number_with_preference, find_duplicate_track_numbers};
 
 /// Result of a completed interactive parsing session.
 pub enum ParsingResult {
@@ -237,9 +237,17 @@ fn confirm_strategy(filenames: &[String], track_numbers: &[Option<u32>]) -> Resu
         );
     }
 
+    let duplicates = find_duplicate_track_numbers(track_numbers);
+    if !duplicates.is_empty() {
+        println!(
+            "Warning: track number(s) {:?} would be assigned to more than one file — those files would collide.",
+            duplicates
+        );
+    }
+
     dialoguer::Confirm::with_theme(&ColorfulTheme::default())
         .with_prompt("Use this strategy?")
-        .default(true)
+        .default(duplicates.is_empty())
         .interact()
         .map_err(|e| HvtError::Parse(format!("Confirmation error: {}", e)))
 }

@@ -264,14 +264,15 @@ async fn tag_all_files(
     }
 
     // STEP 2: Check if files already have track numbers in their ID3 tags
-    let mut existing_track_count = 0;
-    for (file_path, _) in &audio_files {
-        if let Ok(Some(existing_metadata)) = id3_handler::read_id3_tags(file_path) {
-            if existing_metadata.track_number.is_some() {
-                existing_track_count += 1;
-            }
-        }
-    }
+    let existing_tracks: Vec<Option<u32>> = audio_files.iter()
+        .map(|(file_path, _)| {
+            id3_handler::read_id3_tags(file_path, &config.tag_separator)
+                .ok()
+                .flatten()
+                .and_then(|m| m.track_number)
+        })
+        .collect();
+    let existing_track_count = existing_tracks.iter().filter(|t| t.is_some()).count();
 
     // If most files already have track numbers, skip interactive parsing
     let existing_track_rate = existing_track_count as f32 / audio_files.len() as f32;
@@ -294,43 +295,58 @@ async fn tag_all_files(
     // Per-file track numbers from manual input (Session-only, not saved to DB).
     let mut manual_numbers: Option<Vec<Option<u32>>> = None;
 
-    // Only trigger interactive session when files don't already have numbers and no
-    // saved preference exists, and automatic parsing fails on more than 30% of files.
-    if !files_already_numbered && current_pref.is_none() {
-        let parsed: Vec<Option<u32>> = filenames.iter()
-            .map(|f| track_parser::parse_track_number(f))
-            .collect();
+    // Numbers that automatic detection would actually assign this run: only for files that
+    // don't already carry a track number (those are left untouched, see STEP 5).
+    let auto_parsed: Vec<Option<u32>> = filenames.iter().zip(existing_tracks.iter())
+        .filter(|(_, existing)| existing.is_none())
+        .map(|(f, _)| track_parser::parse_track_number_with_preference(f, current_pref.as_ref()))
+        .collect();
 
-        let failure_count = parsed.iter().filter(|p| p.is_none()).count();
-        let failure_rate = failure_count as f32 / parsed.len() as f32;
+    let failure_count = auto_parsed.iter().filter(|p| p.is_none()).count();
+    let failure_rate = if auto_parsed.is_empty() { 0.0 } else { failure_count as f32 / auto_parsed.len() as f32 };
+    let duplicate_numbers = track_parser::find_duplicate_track_numbers(&auto_parsed);
 
-        if failure_rate > 0.3 {
+    // Trigger interactive session when:
+    // - files don't already have numbers, no saved preference exists yet, and automatic
+    //   parsing fails on more than 30% of files, OR
+    // - automatic detection (whether via a saved preference or the fallback chain) would
+    //   assign the same track number to two or more files. A stale/wrong saved preference
+    //   can still collide on a folder with a different file layout, so this check applies
+    //   even when a preference is already saved.
+    let low_confidence = !files_already_numbered && current_pref.is_none() && failure_rate > 0.3;
+    let has_duplicates = !duplicate_numbers.is_empty();
+
+    if low_confidence || has_duplicates {
+        if has_duplicates {
+            info!("Automatic track parsing produced duplicate track number(s) {:?} for {}, requesting user input...",
+                  duplicate_numbers, folder.rjcode.as_str());
+        } else {
             info!("Automatic track parsing low confidence ({}/{} failed), requesting user input...",
                   failure_count, filenames.len());
+        }
 
-            match interactive_parser::run_interactive_parsing(&filenames, folder.rjcode.as_str()) {
-                Ok(interactive_parser::ParsingResult::Strategy(pref)) => {
-                    crate::database::queries::save_track_parsing_preference(conn, &folder.rjcode, &pref)?;
-                    info!("Track parsing preference saved for future use");
-                    current_pref = Some(pref);
-                }
-                Ok(interactive_parser::ParsingResult::Manual(numbers)) => {
-                    info!("Using manual track numbers for {}", folder.rjcode);
-                    manual_numbers = Some(numbers);
-                }
-                Ok(interactive_parser::ParsingResult::Skip) => {
-                    info!("Track numbering skipped for {}", folder.rjcode);
-                }
-                Err(e) => {
-                    warn!("Interactive parsing failed: {}", e);
-                }
+        match interactive_parser::run_interactive_parsing(&filenames, folder.rjcode.as_str()) {
+            Ok(interactive_parser::ParsingResult::Strategy(pref)) => {
+                crate::database::queries::save_track_parsing_preference(conn, &folder.rjcode, &pref)?;
+                info!("Track parsing preference saved for future use");
+                current_pref = Some(pref);
+            }
+            Ok(interactive_parser::ParsingResult::Manual(numbers)) => {
+                info!("Using manual track numbers for {}", folder.rjcode);
+                manual_numbers = Some(numbers);
+            }
+            Ok(interactive_parser::ParsingResult::Skip) => {
+                info!("Track numbering skipped for {}", folder.rjcode);
+            }
+            Err(e) => {
+                warn!("Interactive parsing failed: {}", e);
             }
         }
     }
 
     // STEP 5: Tag each file
     for (file_index, (file_path, filename)) in audio_files.iter().enumerate() {
-        let existing_track = if let Ok(Some(existing_metadata)) = id3_handler::read_id3_tags(file_path) {
+        let existing_track = if let Ok(Some(existing_metadata)) = id3_handler::read_id3_tags(file_path, &config.tag_separator) {
             existing_metadata.track_number
         } else {
             None

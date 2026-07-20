@@ -181,6 +181,7 @@ pub fn parse_track_number_with_preference(
 /// - "Track 01.mp3"
 /// - "1.Track.mp3"
 /// - "disc1-01.mp3"
+/// - "01.mp3" (bare number, no separator on either side)
 ///
 /// Returns None if no track number can be reliably extracted
 pub fn parse_track_number(filename: &str) -> Option<u32> {
@@ -189,6 +190,15 @@ pub fn parse_track_number(filename: &str) -> Option<u32> {
         .rsplit_once('.')
         .map(|(name, _)| name)
         .unwrap_or(filename);
+
+    // Strategy 0: The filename (minus extension) is *nothing but* the track number,
+    // e.g. "01.mp3" or "7.flac". None of the strategies below match this because they
+    // all require a separator character before and/or after the digits.
+    if let Ok(num) = name_without_ext.trim().parse::<u32>() {
+        if num > 0 && num < 1000 {
+            return Some(num);
+        }
+    }
 
     // Strategy 1: Look for number at the beginning (most common)
     // Matches: "01 - Track", "01.Track", "01_Track"
@@ -269,6 +279,20 @@ pub fn parse_track_number(filename: &str) -> Option<u32> {
 
     // If no pattern matched, return None
     None
+}
+
+/// Returns the set of track numbers (sorted, deduplicated) that appear more than once in `numbers`.
+/// `None` entries (unparsed files) are ignored — only actual collisions between assigned
+/// track numbers count as duplicates.
+pub fn find_duplicate_track_numbers(numbers: &[Option<u32>]) -> Vec<u32> {
+    use std::collections::HashMap;
+    let mut counts: HashMap<u32, u32> = HashMap::new();
+    for n in numbers.iter().flatten() {
+        *counts.entry(*n).or_insert(0) += 1;
+    }
+    let mut dups: Vec<u32> = counts.into_iter().filter(|(_, c)| *c > 1).map(|(n, _)| n).collect();
+    dups.sort_unstable();
+    dups
 }
 
 /// Extracts a clean track title from a filename
@@ -386,5 +410,13 @@ mod tests {
         assert_eq!(parse_track_number("0.mp3"), None); // 0 is invalid
         assert_eq!(parse_track_number("1000.mp3"), None); // too large
         assert_eq!(parse_track_number("99.mp3"), Some(99)); // valid
+    }
+
+    #[test]
+    fn test_find_duplicate_track_numbers() {
+        assert_eq!(find_duplicate_track_numbers(&[Some(1), Some(2), Some(3)]), Vec::<u32>::new());
+        assert_eq!(find_duplicate_track_numbers(&[Some(1), Some(1), Some(2)]), vec![1]);
+        assert_eq!(find_duplicate_track_numbers(&[Some(2), None, Some(1), Some(1), Some(2)]), vec![1, 2]);
+        assert_eq!(find_duplicate_track_numbers(&[None, None]), Vec::<u32>::new());
     }
 }
