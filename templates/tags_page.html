@@ -1,0 +1,10 @@
+{% extends "layout.html" %}
+{% block title %}Tags — hvtag{% endblock %}
+{% block content %}
+<h1>Tags</h1>
+<p>Renaming or ignoring a tag applies globally to every work using it. Changes are queued —
+   run <code>hvtag --tag</code> afterwards to apply them to audio files.</p>
+<div id="tags-table-container">
+{{ table_html|safe }}
+</div>
+{% endblock %}

@@ -34,6 +34,40 @@ fn extract_td_after_th(html: &str, th_text: &str) -> Result<Option<String>, HvtE
     Ok(None)
 }
 
+/// Fallback CV extraction for works (common in R18/ASMR listings) that credit the voice actor
+/// only inside the free-text `[Staff]` block of the work description (`.work_parts_area`),
+/// never in the structured product-info table. Each `<br/>`-separated line becomes its own
+/// text node when iterating `ElementRef::text()`, so a line-by-line scan for a
+/// `CV:`/`CV：`/`声優:`/`声優：` prefix reliably isolates just the credit line without needing
+/// to parse the raw `<br/>` markup.
+fn extract_cv_from_staff_block(html: &str) -> Result<Vec<String>, HvtError> {
+    const CV_LINE_PREFIXES: [&str; 4] = ["CV:", "CV：", "声優:", "声優："];
+
+    let document = Html::parse_document(html);
+    let selector = Selector::parse(".work_parts_area")
+        .map_err(|e| HvtError::Parse(format!("Failed to parse work_parts_area selector: {:?}", e)))?;
+
+    for container in document.select(&selector) {
+        for text_node in container.text() {
+            let line = text_node.trim();
+            for prefix in CV_LINE_PREFIXES {
+                if let Some(rest) = line.strip_prefix(prefix) {
+                    let names: Vec<String> = rest
+                        .split(|c| c == '/' || c == '、' || c == '&')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    if !names.is_empty() {
+                        return Ok(names);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(vec![])
+}
+
 impl DlSiteProductScrapResult {
     pub async fn build_from_rjcode(rjcode: String) -> DlSiteProductScrapResult {
         Self::build_from_rjcode_with_client(rjcode, None).await
@@ -105,6 +139,9 @@ impl DlSiteProductScrapResult {
             if let Some(elem) = extract_td_after_th(&html, "声優")? {
                 cvs = elem.split(" / ").map(|x| x.trim().to_string()).collect();
             }
+        }
+        if cvs.is_empty() {
+            cvs = extract_cv_from_staff_block(&html)?;
         }
         if cvs.is_empty() {
             cvs.push(String::from("<unknown>"));
@@ -211,4 +248,74 @@ pub async fn scrape_circle_profile(
     };
 
     Ok((name_en, name_jp))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Mirrors the real structure found on RJ197417's page: no structured Voice Actor row,
+    /// CV credited only in the free-text [Staff] block inside .work_parts_area.
+    #[test]
+    fn test_extract_cv_from_staff_block_english() {
+        let html = r#"<html><body>
+            <div class="work_parts_area">
+                <p>Some description text.<br />
+                <br />
+                [Staff]<br />
+                CV: Nodoka Nishiura<br />
+                Illustration: tegurayuki<br />
+                Scenario: Chitatsu Omi</p>
+            </div>
+        </body></html>"#;
+
+        let cvs = extract_cv_from_staff_block(html).unwrap();
+        assert_eq!(cvs, vec!["Nodoka Nishiura".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_cv_from_staff_block_japanese_fullwidth_colon() {
+        let html = r#"<html><body>
+            <div class="work_parts_area">
+                <p>[Staff]<br />
+                声優：花子<br />
+                イラスト：太郎</p>
+            </div>
+        </body></html>"#;
+
+        let cvs = extract_cv_from_staff_block(html).unwrap();
+        assert_eq!(cvs, vec!["花子".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_cv_from_staff_block_multiple_names() {
+        let html = r#"<html><body>
+            <div class="work_parts_area">
+                <p>[Staff]<br />
+                CV: Name A / Name B</p>
+            </div>
+        </body></html>"#;
+
+        let cvs = extract_cv_from_staff_block(html).unwrap();
+        assert_eq!(cvs, vec!["Name A".to_string(), "Name B".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_cv_from_staff_block_no_credit_present() {
+        let html = r#"<html><body>
+            <div class="work_parts_area">
+                <p>Just a description with no staff credits at all.</p>
+            </div>
+        </body></html>"#;
+
+        let cvs = extract_cv_from_staff_block(html).unwrap();
+        assert!(cvs.is_empty());
+    }
+
+    #[test]
+    fn test_extract_cv_from_staff_block_no_container_present() {
+        let html = r#"<html><body><p>No work_parts_area div at all.</p></body></html>"#;
+        let cvs = extract_cv_from_staff_block(html).unwrap();
+        assert!(cvs.is_empty());
+    }
 }

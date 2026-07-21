@@ -1,0 +1,27 @@
+{% extends "layout.html" %}
+{% block title %}Stats — hvtag{% endblock %}
+{% block content %}
+<h1>Stats</h1>
+<p>Total works: <strong>{{ total_works }}</strong></p>
+
+<h2>Top tags <a href="/tags">(see all)</a></h2>
+<ul class="stat-list">
+{% for row in top_tags %}
+<li><a href="/works?tag={{ row.key|urlencode }}">{{ row.label }}</a> <span class="count">{{ row.count }}</span></li>
+{% endfor %}
+</ul>
+
+<h2>Top circles <a href="/circles">(see all)</a></h2>
+<ul class="stat-list">
+{% for row in top_circles %}
+<li><a href="/works?circle={{ row.key|urlencode }}">{{ row.label }}</a> <span class="count">{{ row.count }}</span></li>
+{% endfor %}
+</ul>
+
+<h2>Top voice actors <a href="/cvs">(see all)</a></h2>
+<ul class="stat-list">
+{% for row in top_cvs %}
+<li><a href="/works?cv={{ row.key|urlencode }}">{{ row.label }}</a> <span class="count">{{ row.count }}</span></li>
+{% endfor %}
+</ul>
+{% endblock %}

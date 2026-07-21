@@ -80,18 +80,43 @@ pub fn insert_circle(
     Ok(rows)
 }
 
-/// Insert a CV (voice actor)
+/// Insert a CV (voice actor), looked up by its natural key (`name_jp`) FIRST so a
+/// re-encountered actor reuses their existing cv_id instead of minting a new one and
+/// triggering `INSERT OR REPLACE`'s delete-then-insert conflict path (which cascades and
+/// deletes every other work's lkp_work_cvs row for that actor). Returns the cv_id: the
+/// existing row's id if `name_jp` already exists, otherwise the id assigned by SQLite's
+/// native `INTEGER PRIMARY KEY` autoincrement.
 pub fn insert_cv(
     conn: &Connection,
     jp_name: &str,
     en_name: &str,
-    cv_id: usize,
-) -> Result<usize, HvtError> {
-    let rows = conn.execute(
-        &format!("INSERT OR REPLACE INTO {DB_CVS_NAME} (cv_id, name_jp, name_en) VALUES (?1, ?2, ?3)"),
-        params![cv_id, jp_name, en_name],
+) -> Result<i64, HvtError> {
+    let existing: Option<i64> = conn
+        .query_row(
+            &format!("SELECT cv_id FROM {DB_CVS_NAME} WHERE name_jp = ?1"),
+            params![jp_name],
+            |row| row.get(0),
+        )
+        .ok();
+
+    if let Some(cv_id) = existing {
+        return Ok(cv_id);
+    }
+
+    conn.execute(
+        &format!("INSERT INTO {DB_CVS_NAME} (name_jp, name_en) VALUES (?1, ?2)"),
+        params![jp_name, en_name],
     )?;
-    Ok(rows)
+    Ok(conn.last_insert_rowid())
+}
+
+/// Narrow, unambiguous CV-name normalization applied before any DB lookup/insert: only
+/// collapses full-width parentheses （）(U+FF08/U+FF09) to their half-width ASCII equivalents
+/// () and trims whitespace. Deliberately does NOT strip parenthetical content (e.g. a
+/// "(real name)" suffix) and does NOT fold kana spelling variants — both are ambiguous
+/// judgment calls left entirely to the manual custom_cv_mappings merge UI.
+pub fn normalize_cv_name(name: &str) -> String {
+    name.replace('（', "(").replace('）', ")").trim().to_string()
 }
 
 /// Remove previous data of a work from a table
@@ -306,37 +331,62 @@ pub fn get_max_id(
     Ok(max_id)
 }
 
-/// Get all works (RJCodes) from the database
-pub fn get_all_works(conn: &Connection) -> Result<Vec<RJCode>, HvtError> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT rjcode FROM {DB_FOLDERS_NAME} WHERE active = 1"
-    ))?;
-    let rows = stmt.query_map([], |row| row.get(0))?;
-    let rjcodes: Vec<RJCode> = rows.collect::<Result<Vec<_>, _>>()?;
-    Ok(rjcodes)
-}
-
-/// Get all works with their paths from the database
+/// Get all active works with their registered paths — used by `--full-retag` to enumerate
+/// every work in the library.
 pub fn get_all_works_with_paths(conn: &Connection) -> Result<Vec<(RJCode, String)>, HvtError> {
     let mut stmt = conn.prepare(&format!(
         "SELECT rjcode, path FROM {DB_FOLDERS_NAME} WHERE active = 1"
     ))?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get(0)?, row.get(1)?))
-    })?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
     let works: Vec<(RJCode, String)> = rows.collect::<Result<Vec<_>, _>>()?;
     Ok(works)
 }
 
-/// Get all unscanned works (RJCodes) from the database
-pub fn get_unscanned_works(conn: &Connection) -> Result<Vec<RJCode>, HvtError> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT rjcode FROM {DB_FOLDERS_NAME}
-         WHERE fld_id NOT IN (SELECT fld_id FROM {DB_WORKS_NAME})"
-    ))?;
-    let rows = stmt.query_map([], |row| row.get(0))?;
-    let rjcodes: Vec<RJCode> = rows.collect::<Result<Vec<_>, _>>()?;
-    Ok(rjcodes)
+/// Get the registered folder path for a specific work, if it exists in the database.
+/// Used by `--retag <rjcode>` to resolve the real library path rather than assuming cwd.
+pub fn get_work_path(conn: &Connection, rjcode: &RJCode) -> Result<Option<String>, HvtError> {
+    let path: Option<String> = conn
+        .query_row(
+            &format!("SELECT path FROM {DB_FOLDERS_NAME} WHERE rjcode = ?1"),
+            params![rjcode],
+            |row| row.get(0),
+        )
+        .ok();
+    Ok(path)
+}
+
+/// Check if a work is already registered in the database — used by `--tag <folder>` to refuse
+/// running its one-shot test mode against an already-imported work (see `rjcode_exists`'s
+/// counterpart usage: that path temporarily inserts then deletes a folder row, which would be
+/// unsafe to run against a real, pre-existing work).
+pub fn rjcode_exists(conn: &Connection, rjcode: &RJCode) -> Result<bool, HvtError> {
+    let count: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM {DB_FOLDERS_NAME} WHERE rjcode = ?1"),
+        params![rjcode],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// Permanently removes a work from the database (no filesystem changes) — for works whose folder
+/// is already gone from disk, where the trash feature's file-move step doesn't apply. Unlike
+/// `deactivate_and_relocate_work` (the reversible trash path), this is NOT reversible: every
+/// child row is gone for good. `file_processing` has no `ON DELETE CASCADE` on `fld_id` (see
+/// `tables.rs`), so it must be deleted explicitly first; everything else under `folders.fld_id`
+/// (works, lkp_work_tag/circle/cvs, rating, stars, release_date, dlsite_covers, dlsite_scan,
+/// track_parsing_prefs) cascades from the final `folders` delete.
+pub fn delete_work_permanently(conn: &Connection, rjcode: &RJCode) -> Result<(), HvtError> {
+    conn.execute(
+        &format!(
+            "DELETE FROM {DB_FILE_PROCESSING_NAME} WHERE fld_id = (SELECT fld_id FROM {DB_FOLDERS_NAME} WHERE rjcode = ?1)"
+        ),
+        params![rjcode],
+    )?;
+    conn.execute(
+        &format!("DELETE FROM {DB_FOLDERS_NAME} WHERE rjcode = ?1"),
+        params![rjcode],
+    )?;
+    Ok(())
 }
 
 /// Get all unscanned works with their paths from the database
@@ -370,25 +420,6 @@ pub fn get_cover_link(conn: &Connection, rjcode: &RJCode) -> Result<Option<Strin
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.into()),
     }
-}
-
-/// Get all works with cover links and their folder paths
-/// Returns Vec<(RJCode, folder_path, cover_url)>
-pub fn get_all_works_with_cover_links(conn: &Connection) -> Result<Vec<(RJCode, String, String)>, HvtError> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT f.rjcode, f.path, dc.link
-         FROM {DB_FOLDERS_NAME} f
-         INNER JOIN {DB_DLSITE_COVERS_LINK_NAME} dc ON f.fld_id = dc.fld_id
-         WHERE f.active = 1 AND f.path IS NOT NULL AND dc.link IS NOT NULL
-         ORDER BY f.rjcode"
-    ))?;
-
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-    })?;
-
-    let works: Vec<(RJCode, String, String)> = rows.collect::<Result<Vec<_>, _>>()?;
-    Ok(works)
 }
 
 /// Get track parsing preference for a work
@@ -466,4 +497,35 @@ pub fn update_folder_path(
         params![new_path, rjcode],
     )?;
     Ok(rows)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_cv_name_collapses_paren_width() {
+        // The two real near-duplicate DB rows differing only by paren width must normalize
+        // to the exact same string.
+        assert_eq!(
+            normalize_cv_name("乙倉ゅい(乙倉由依)"),
+            normalize_cv_name("乙倉ゅい（乙倉由依）"),
+        );
+        assert_eq!(normalize_cv_name("乙倉ゅい（乙倉由依）"), "乙倉ゅい(乙倉由依)");
+    }
+
+    #[test]
+    fn test_normalize_cv_name_leaves_ambiguous_variants_distinct() {
+        // Kana spelling variant (ゅ vs ゆ) is intentionally NOT folded - ambiguous, left to
+        // the manual custom_cv_mappings merge UI.
+        assert_ne!(normalize_cv_name("乙倉ゅい"), normalize_cv_name("乙倉ゆい"));
+        // Name-presence variant (with vs without a real-name gloss) is intentionally NOT
+        // stripped either.
+        assert_ne!(normalize_cv_name("MOMOKA。"), normalize_cv_name("MOMOKA。（柚木桃香）"));
+    }
+
+    #[test]
+    fn test_normalize_cv_name_trims_whitespace() {
+        assert_eq!(normalize_cv_name("  Nodoka Nishiura  "), "Nodoka Nishiura");
+    }
 }

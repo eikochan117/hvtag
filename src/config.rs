@@ -96,6 +96,45 @@ pub struct ImportConfig {
     pub library_path: Option<String>,
 }
 
+// ========== Web UI Configuration ==========
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UiConfig {
+    /// Bind address for the --ui web server. Defaults to loopback-only for safety.
+    #[serde(default = "default_ui_bind_address")]
+    pub bind_address: String,
+
+    /// Port for the --ui web server.
+    #[serde(default = "default_ui_port")]
+    pub port: u16,
+
+    /// Number of works shown per page in the works list.
+    #[serde(default = "default_ui_page_size")]
+    pub page_size: i64,
+}
+
+fn default_ui_bind_address() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_ui_port() -> u16 {
+    8787
+}
+
+fn default_ui_page_size() -> i64 {
+    50
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            bind_address: default_ui_bind_address(),
+            port: default_ui_port(),
+            page_size: default_ui_page_size(),
+        }
+    }
+}
+
 // ========== Root Configuration ==========
 
 /// Root configuration structure
@@ -109,6 +148,9 @@ pub struct Config {
 
     #[serde(default)]
     pub import: ImportConfig,
+
+    #[serde(default)]
+    pub ui: UiConfig,
 }
 
 impl Default for Config {
@@ -117,6 +159,7 @@ impl Default for Config {
             vpn: VpnConfig::default(),
             tagger: TaggerConfig::default(),
             import: ImportConfig::default(),
+            ui: UiConfig::default(),
         }
     }
 }
@@ -201,6 +244,21 @@ use_null_separator = false
 # Custom separator to use when use_null_separator is false
 # Common separators: "; " (default), " / ", ", ", " | "
 custom_separator = "; "
+
+[ui]
+# Bind address for the --ui web server. Defaults to loopback-only (127.0.0.1) for safety.
+# To reach it from your phone over Tailscale/VPN, set this to your Tailscale IP
+# (e.g. "100.x.y.z") or "0.0.0.0" to listen on all interfaces.
+# SECURITY: hvtag's web UI has NO authentication. Only bind beyond 127.0.0.1
+# if this machine's network exposure is fully controlled by your VPN/firewall -
+# anyone who can reach this address and port gets full read+write access to your library.
+bind_address = "127.0.0.1"
+
+# Port for the --ui web server.
+port = 8787
+
+# Number of works shown per page in the works list.
+page_size = 50
 "#)
     }
 

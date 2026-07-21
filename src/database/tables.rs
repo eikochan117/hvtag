@@ -142,6 +142,16 @@ pub const DB_CUSTOM_CIRCLE_MAPPINGS_COLS: &str = "cir_id INTEGER PRIMARY KEY, \
     modified_at TEXT DEFAULT (datetime('now')), \
     FOREIGN KEY (cir_id) REFERENCES circles(cir_id) ON DELETE CASCADE";
 
+// Custom CV (voice actor) mappings - mapping GLOBAL d'un cv_id vers un nom de scène personnalisé
+// Un seul mapping par CV, s'applique à TOUTES les œuvres où cet acteur apparaît.
+// Rename-only (pas de concept "ignore" — on ne peut pas "ignorer" un acteur comme un tag).
+pub const DB_CUSTOM_CV_MAPPINGS_NAME: &str = "custom_cv_mappings";
+pub const DB_CUSTOM_CV_MAPPINGS_COLS: &str = "cv_id INTEGER PRIMARY KEY, \
+    custom_name TEXT NOT NULL, \
+    created_at TEXT DEFAULT (datetime('now')), \
+    modified_at TEXT DEFAULT (datetime('now')), \
+    FOREIGN KEY (cv_id) REFERENCES cvs(cv_id) ON DELETE CASCADE";
+
 // Indexes pour file_processing
 pub const DB_FILE_PROCESSING_INDEX_FLD_ID: &str =
     "CREATE INDEX IF NOT EXISTS idx_file_processing_fld_id ON file_processing(fld_id)";

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}hvtag{% endblock %}</title>
+<script src="/static/htmx.min.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0;
+    background: #14161a;
+    color: #e6e6e6;
+  }
+  nav {
+    display: flex;
+    gap: 1.25rem;
+    padding: 0.9rem 1.25rem;
+    background: #1c1f26;
+    border-bottom: 1px solid #2a2e37;
+    position: sticky;
+    top: 0;
+  }
+  nav a {
+    color: #d7d7d7;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  nav a:hover { color: #fff; }
+  main { padding: 1rem 1.25rem 2.5rem; max-width: 1200px; margin: 0 auto; }
+  a { color: #8ab4ff; }
+  input[type=search], input[type=text] {
+    background: #1c1f26;
+    border: 1px solid #333844;
+    color: #eee;
+    padding: 0.55rem 0.75rem;
+    border-radius: 6px;
+    font-size: 1rem;
+    width: 100%;
+  }
+  select { background: #1c1f26; color: #eee; border: 1px solid #333844; padding: 0.4rem; border-radius: 6px; }
+  button {
+    background: #2c3440;
+    color: #eee;
+    border: 1px solid #3d4656;
+    padding: 0.4rem 0.8rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  button:hover { background: #37414f; }
+  button.danger { border-color: #6b3838; }
+  button.danger:hover { background: #4a2b2b; }
+  table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+  th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid #262a32; vertical-align: middle; }
+  th { color: #9aa3b2; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; }
+  th a.sort-link { color: #9aa3b2; text-decoration: none; cursor: pointer; white-space: nowrap; }
+  th a.sort-link:hover { color: #fff; }
+  .chip {
+    display: inline-block;
+    background: #232833;
+    border: 1px solid #333a47;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    margin: 0.15rem 0.25rem 0.15rem 0;
+  }
+  .work-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+  .work-card { text-decoration: none; color: inherit; }
+  .work-card img {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: 8px;
+    border: 1px solid #262a32;
+    background: #1c1f26;
+  }
+  .work-card .name { font-size: 0.9rem; margin-top: 0.4rem; line-height: 1.25; }
+  .work-card .circle { font-size: 0.8rem; color: #9aa3b2; }
+  .pagination { display: flex; gap: 0.5rem; margin-top: 1.25rem; align-items: center; }
+  .cover-detail { max-width: 320px; width: 100%; border-radius: 10px; border: 1px solid #262a32; }
+  .detail-grid { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-top: 1rem; }
+  .detail-meta dt { color: #9aa3b2; font-size: 0.8rem; text-transform: uppercase; margin-top: 0.75rem; }
+  .detail-meta dd { margin: 0.15rem 0 0; }
+  form.inline { display: inline-flex; gap: 0.4rem; align-items: center; }
+  a.chip { color: inherit; text-decoration: none; }
+  .active-filter {
+    margin: 0.5rem 0 1rem;
+    padding: 0.5rem 0.75rem;
+    background: #232833;
+    border: 1px solid #333a47;
+    border-radius: 6px;
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+  }
+  .active-filter a { margin-left: auto; }
+  .stat-list { list-style: none; padding: 0; margin: 0.5rem 0 1.5rem; }
+  .stat-list li { display: flex; justify-content: space-between; padding: 0.3rem 0; border-bottom: 1px solid #20242c; }
+  .stat-list .count { color: #9aa3b2; font-size: 0.85rem; }
+  .cover-toggle {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    color: #9aa3b2;
+    cursor: pointer;
+    user-select: none;
+  }
+  body.covers-hidden .work-card img,
+  body.covers-hidden .cover-detail,
+  body.covers-hidden .table-thumb {
+    display: none;
+  }
+  .works-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.75rem 0;
+  }
+  .view-toggle { display: flex; gap: 0.25rem; }
+  .view-toggle button.active { background: #3d4656; border-color: #55627a; }
+  .table-scroll { overflow-x: auto; }
+  .table-thumb {
+    width: 48px;
+    height: 48px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid #262a32;
+    background: #1c1f26;
+    vertical-align: middle;
+    display: block;
+  }
+  .works-table td, .works-table th { white-space: nowrap; }
+</style>
+</head>
+<body>
+<nav>
+  <a href="/works">Works</a>
+  <a href="/tags">Tags</a>
+  <a href="/circles">Circles</a>
+  <a href="/cvs">Voice Actors</a>
+  <a href="/stats">Stats</a>
+  <label class="cover-toggle">
+    <input type="checkbox" id="covers-toggle">
+    Show covers
+  </label>
+</nav>
+<main>
+{% block content %}{% endblock %}
+</main>
+<script>
+(function() {
+  // Cover images use data-cover-src instead of src, so nothing is fetched from the network
+  // share until the user opts in — with hundreds of works, loading every thumbnail by default
+  // would be wasteful. State persists across pages/sessions via localStorage.
+  var STORAGE_KEY = 'hvtag-show-covers';
+
+  function applyCoverState(show) {
+    document.body.classList.toggle('covers-hidden', !show);
+    if (show) {
+      document.querySelectorAll('img[data-cover-src]').forEach(function(img) {
+        if (!img.src || img.src === '') {
+          img.src = img.getAttribute('data-cover-src');
+        }
+      });
+    }
+  }
+
+  var show = localStorage.getItem(STORAGE_KEY) === 'true'; // default: hidden
+  applyCoverState(show);
+
+  var toggle = document.getElementById('covers-toggle');
+  toggle.checked = show;
+  toggle.addEventListener('change', function() {
+    show = toggle.checked;
+    localStorage.setItem(STORAGE_KEY, show);
+    applyCoverState(show);
+  });
+
+  // Re-apply after htmx swaps in new content (e.g. live search results)
+  document.body.addEventListener('htmx:afterSwap', function() {
+    applyCoverState(show);
+  });
+})();
+</script>
+</body>
+</html>

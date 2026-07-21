@@ -29,7 +29,8 @@ pub async fn process_work_folder(
     // Check if re-tagging needed (custom tags OR circle preferences modified)
     let needs_retag_tags = crate::database::custom_tags::should_retag_work(conn, &folder.rjcode).unwrap_or(false);
     let needs_retag_circle = crate::database::custom_circles::should_retag_work_for_circle(conn, &folder.rjcode).unwrap_or(false);
-    let needs_retag = needs_retag_tags || needs_retag_circle || config.force_retag;
+    let needs_retag_cv = crate::database::custom_cvs::should_retag_work_for_cv(conn, &folder.rjcode).unwrap_or(false);
+    let needs_retag = needs_retag_tags || needs_retag_circle || needs_retag_cv || config.force_retag;
 
     // Skip if already tagged and no re-tagging needed
     if folder.is_tagged && !needs_retag {
@@ -46,6 +47,9 @@ pub async fn process_work_folder(
     }
     if needs_retag_circle {
         info!("Circle preference modified, re-tagging work: {}", folder.rjcode.as_str());
+    }
+    if needs_retag_cv {
+        info!("CV mapping modified, re-tagging work: {}", folder.rjcode.as_str());
     }
 
     // Step 0: Normalize folder structure (move all audio files to root level)
@@ -80,8 +84,10 @@ pub async fn process_work_folder(
     // Tag all audio files
     tag_all_files(conn, fld_id, folder, &metadata, config).await?;
 
-    // Mark folder as tagged by creating .tagged file
-    create_tagged_marker(&folder.path)?;
+    // Mark folder as tagged by creating .tagged file (skipped for one-shot test runs)
+    if config.write_tagged_marker {
+        create_tagged_marker(&folder.path)?;
+    }
 
     info!("Successfully processed folder: {}", folder.path);
     Ok(())
@@ -135,19 +141,9 @@ fn fetch_metadata_from_db(conn: &Connection, rjcode: &RJCode) -> Result<AudioMet
     let tags = crate::database::custom_tags::get_merged_tags_for_work(conn, rjcode)
         .unwrap_or_default();
 
-    // Get CVs (voice actors) - will be used as artists
-    let mut cv_stmt = conn.prepare(
-        "SELECT name_jp FROM cvs WHERE cv_id IN (
-            SELECT cv_id FROM lkp_work_cvs WHERE fld_id = (
-                SELECT fld_id FROM folders WHERE rjcode = ?1
-            )
-        )"
-    )?;
-
-    let cvs: Vec<String> = cv_stmt
-        .query_map(rusqlite::params![rjcode], |row| row.get(0))?
-        .filter_map(|r| r.ok())
-        .collect();
+    // Get CVs (voice actors, merged with any custom rename) - will be used as artists
+    let cvs = crate::database::custom_cvs::get_merged_cvs_for_work(conn, rjcode)
+        .unwrap_or_default();
 
     // Get release date
     let release_date: Option<String> = conn.query_row(

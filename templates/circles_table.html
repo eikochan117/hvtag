@@ -1,0 +1,32 @@
+<table>
+<thead><tr>
+  <th><a class="sort-link" hx-get="/circles/table?sort=name&dir={% if sort == "name" && dir == "asc" %}desc{% else %}asc{% endif %}" hx-target="#circles-table-container" hx-push-url="true">Circle{% if sort == "name" %} {% if dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}</a></th>
+  <th><a class="sort-link" hx-get="/circles/table?sort=rgcode&dir={% if sort == "rgcode" && dir == "asc" %}desc{% else %}asc{% endif %}" hx-target="#circles-table-container" hx-push-url="true">RG code{% if sort == "rgcode" %} {% if dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}</a></th>
+  <th><a class="sort-link" hx-get="/circles/table?sort=pref&dir={% if sort == "pref" && dir == "asc" %}desc{% else %}asc{% endif %}" hx-target="#circles-table-container" hx-push-url="true">Preference{% if sort == "pref" %} {% if dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}</a></th>
+  <th>Actions</th>
+</tr></thead>
+<tbody>
+{% for c in circles %}
+<tr>
+  <td><a href="/works?circle={{ c.rgcode|urlencode }}">{{ c.name_jp }} / {{ c.name_en }}</a></td>
+  <td>{{ c.rgcode }}</td>
+  <td>
+    <form class="inline" hx-post="/circles/{{ c.cir_id }}/preference?sort={{ sort }}&dir={{ dir }}" hx-target="#circles-table-container" hx-swap="innerHTML">
+      <select name="preference_type">
+        <option value="force_en" {% if c.pref_type.as_deref() == Some("force_en") %}selected{% endif %}>Force EN</option>
+        <option value="force_jp" {% if c.pref_type.as_deref() == Some("force_jp") %}selected{% endif %}>Force JP</option>
+        <option value="custom" {% if c.pref_type.as_deref() == Some("custom") %}selected{% endif %}>Custom</option>
+        <option value="use_code" {% if c.pref_type.as_deref() == Some("use_code") %}selected{% endif %}>Use code</option>
+      </select>
+      <input type="text" name="custom_name" placeholder="custom name (if Custom)" value="{% if let Some(cn) = c.custom_name %}{{ cn }}{% endif %}">
+      <button type="submit">Set</button>
+    </form>
+    {% if c.pref_type.is_some() %}
+    <button class="danger" hx-post="/circles/{{ c.cir_id }}/reset?sort={{ sort }}&dir={{ dir }}" hx-target="#circles-table-container" hx-swap="innerHTML">Reset</button>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+<p>Total: {{ circles.len() }} circles</p>

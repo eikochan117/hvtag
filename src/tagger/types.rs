@@ -102,6 +102,10 @@ pub struct TaggerConfig {
     pub download_cover: bool,
     pub tag_separator: String,
     pub force_retag: bool,
+    /// Whether to write the `.tagged` marker file after processing. Set to `false` for one-shot
+    /// test runs (`--tag <folder>`) so a later real `--full` import on the same folder isn't
+    /// mistakenly skipped because of a marker left behind by the test.
+    pub write_tagged_marker: bool,
 }
 
 impl Default for TaggerConfig {
@@ -112,6 +116,7 @@ impl Default for TaggerConfig {
             tag_separator: "; ".to_string(),
             download_cover: true,
             force_retag: false,
+            write_tagged_marker: true,
         }
     }
 }

@@ -1,0 +1,32 @@
+<table>
+<thead><tr>
+  <th><a class="sort-link" hx-get="/tags/table?sort=tag&dir={% if sort == "tag" && dir == "asc" %}desc{% else %}asc{% endif %}" hx-target="#tags-table-container" hx-push-url="true">DLSite tag{% if sort == "tag" %} {% if dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}</a></th>
+  <th><a class="sort-link" hx-get="/tags/table?sort=custom&dir={% if sort == "custom" && dir == "asc" %}desc{% else %}asc{% endif %}" hx-target="#tags-table-container" hx-push-url="true">Custom name{% if sort == "custom" %} {% if dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}</a></th>
+  <th><a class="sort-link" hx-get="/tags/table?sort=works&dir={% if sort == "works" && dir == "asc" %}desc{% else %}asc{% endif %}" hx-target="#tags-table-container" hx-push-url="true">Works{% if sort == "works" %} {% if dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}</a></th>
+  <th>Actions</th>
+</tr></thead>
+<tbody>
+{% for t in tags %}
+<tr>
+  <td><a href="/works?tag={{ t.display_name()|urlencode }}">{{ t.tag_name }}</a>{% if t.is_ignored %} <em>(ignored)</em>{% endif %}</td>
+  <td>{% if let Some(c) = t.custom_name %}{{ c }}{% else %}&mdash;{% endif %}</td>
+  <td>{{ t.work_count }}</td>
+  <td>
+    <form class="inline" hx-post="/tags/{{ t.tag_id }}/rename?sort={{ sort }}&dir={{ dir }}" hx-target="#tags-table-container" hx-swap="innerHTML">
+      <input type="text" name="custom_tag_name" placeholder="rename to..." value="{% if let Some(c) = t.custom_name %}{{ c }}{% endif %}">
+      <button type="submit">Rename</button>
+    </form>
+    {% if t.is_ignored %}
+    <button class="danger" hx-post="/tags/{{ t.tag_id }}/reset?sort={{ sort }}&dir={{ dir }}" hx-target="#tags-table-container" hx-swap="innerHTML">Un-ignore</button>
+    {% else %}
+    <button class="danger" hx-post="/tags/{{ t.tag_id }}/ignore?sort={{ sort }}&dir={{ dir }}" hx-target="#tags-table-container" hx-swap="innerHTML">Ignore</button>
+    {% if t.custom_name.is_some() %}
+    <button hx-post="/tags/{{ t.tag_id }}/reset?sort={{ sort }}&dir={{ dir }}" hx-target="#tags-table-container" hx-swap="innerHTML">Reset name</button>
+    {% endif %}
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+<p>Total: {{ tags.len() }} tags</p>

@@ -118,14 +118,19 @@ pub async fn assign_data_to_work_with_client(
     // CVS
     if data_selection.cvs {
         debug!("assign cvs: {:?}", &sr.cvs);
-        let mut max_cv_id = queries::get_max_id(conn, "cv_id", DB_CVS_NAME)?;
 
-        for cv in &sr.cvs {
-            max_cv_id += queries::insert_cv(conn, cv, "", max_cv_id + 1)?;
+        // Normalize before both insert and assign so the two agree on the exact string used
+        // for the name_jp lookup/join (see queries::normalize_cv_name).
+        let normalized_cvs: Vec<String> = sr.cvs.iter()
+            .map(|cv| queries::normalize_cv_name(cv))
+            .collect();
+
+        for cv in &normalized_cvs {
+            queries::insert_cv(conn, cv, "")?;
         }
 
         queries::remove_previous_data_of_work(conn, DB_LKP_WORK_CVS_NAME, &work)?;
-        queries::assign_cvs_to_work(conn, &work, &sr.cvs)?;
+        queries::assign_cvs_to_work(conn, &work, &normalized_cvs)?;
     }
 
     // COVER LINK

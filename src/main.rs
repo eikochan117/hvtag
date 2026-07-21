@@ -7,7 +7,7 @@ use std::path::Path;
 use crate::{
     database::{db_loader::open_db, init, queries},
     dlsite::{assign_data_to_work_with_client, DataSelection},
-    folders::{get_list_of_folders, get_list_of_unscanned_works, register_folders, types::{ManagedFolder, RJCode}},
+    folders::{get_list_of_folders, register_folders, types::{ManagedFolder, RJCode}},
     tagger::{cover_art, converter, folder_normalizer, process_work_folder, types::TaggerConfig},
     vpn::WireGuardManager,
     config::{Config, VpnProvider},
@@ -22,53 +22,27 @@ mod tag_manager;
 mod circle_manager;
 mod vpn;
 mod config;
+mod web;
 
 #[derive(Parser, Debug)]
 struct PrgmArgs {
-    // ===== IMPORT WORKFLOW =====
-    /// Import: scan from config source_path, process, then move to library_path
-    #[arg(long)]
-    import: bool,
-
-    /// Scan library_path and add missing works to database
-    #[arg(long)]
-    scan: bool,
-
-    /// Specific work code to process (RJxxxxxx or VJxxxxxx)
-    #[arg(long)]
-    rjcode: Option<String>,
-
-    // ===== PROCESSING STEPS =====
-    /// Collect metadata from DLSite
-    #[arg(long)]
-    collect: bool,
-
-    /// Download cover images from database links to work folders
-    #[arg(long)]
-    image: bool,
-
-    /// Apply tags to audio files
-    #[arg(long)]
-    tag: bool,
-
-    /// Alias for --tag
-    #[arg(long)]
-    apply: bool,
-
-    /// Convert files to MP3 320kbps
-    #[arg(long)]
-    convert: bool,
-
-    /// Force re-tag all files (ignore already tagged status)
-    #[arg(long)]
-    force: bool,
-
-    // ===== COMBINED WORKFLOWS =====
-    /// Full pipeline: import + collect + image + tag (equivalent to --import --collect --image --tag)
+    /// Full pipeline: detect/format import folder, collect metadata+cover, tag files, move to library
     #[arg(long)]
     full: bool,
 
-    // ===== OTHER =====
+    /// Refresh an existing work already in the library (re-collect metadata/CVs/cover, re-tag files)
+    #[arg(long)]
+    retag: Option<String>,
+
+    /// Refresh EVERY work already registered in the library (same as --retag, looped over all of them)
+    #[arg(long)]
+    full_retag: bool,
+
+    /// One-shot test: run the full process on a folder in the import directory,
+    /// without moving it or touching the database
+    #[arg(long)]
+    tag: Option<String>,
+
     /// Interactive tag management
     #[arg(long)]
     manage_tags: bool,
@@ -76,6 +50,15 @@ struct PrgmArgs {
     /// Interactive circle management
     #[arg(long)]
     manage_circles: bool,
+
+    /// Launch local web UI server (browse/search library, edit tag & circle mappings)
+    #[arg(long)]
+    ui: bool,
+
+    /// Override the [ui] bind address/port from config.toml for this run.
+    /// Accepts a bare host (keeps the configured port) or a full "host:port" (e.g. "0.0.0.0:8787").
+    #[arg(long)]
+    ui_bind: Option<String>,
 }
 
 #[tokio::main]
@@ -89,17 +72,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let mut args = PrgmArgs::parse();
+    let args = PrgmArgs::parse();
     let db = open_db(None)?;
     init(&db)?;
-
-    // --full is a shortcut for --import --collect --image --tag
-    if args.full {
-        args.import = true;
-        args.collect = true;
-        args.image = true;
-        args.tag = true;
-    }
 
     // Handle tag management (early exit if specified)
     if args.manage_tags {
@@ -116,91 +91,244 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration
     let app_config = Config::load()?;
 
-    // --scan: Add existing works from library_path to database
-    if args.scan {
-        run_scan_workflow(&db, &app_config)?;
+    // --ui: Launch local web UI server (exclusive; needs config for bind address/port)
+    if args.ui {
+        web::run_ui_workflow(db, &app_config, args.ui_bind).await?;
         return Ok(());
     }
 
-    // --import workflow (for new works from source directory)
-    if args.import {
-        run_import_workflow(&db, &args, &app_config).await?;
+    // --retag <rjcode>: refresh an existing work already registered in the library
+    if let Some(rjcode) = args.retag {
+        run_retag_workflow(&db, &rjcode, &app_config).await?;
         return Ok(());
     }
 
-    // Standalone commands for existing works in database
-    let has_action = args.collect || args.image || args.tag || args.apply || args.convert;
-
-    if !has_action {
-        info!("No action specified. Use --import to process new works, or --help for options.");
-        info!("Use --collect/--tag/--image to process existing works in database.");
+    // --full-retag: refresh every work registered in the library
+    if args.full_retag {
+        run_full_retag_workflow(&db, &app_config).await?;
         return Ok(());
     }
 
-    // Run standalone workflow for existing database works
-    run_standalone_workflow(&db, &args, &app_config).await?;
+    // --tag <folder>: one-shot test-tag a folder from the import directory, no DB/move
+    if let Some(folder_name) = args.tag {
+        run_tag_test_workflow(&db, &folder_name, &app_config).await?;
+        return Ok(());
+    }
 
+    // --full: import workflow (new works from source directory)
+    if args.full {
+        run_import_workflow(&db, &app_config).await?;
+        return Ok(());
+    }
+
+    info!("No action specified. Use --full to import new works, --retag <rjcode> to refresh an existing work, --tag <folder> to test-tag a folder without importing it, or --ui to browse the library.");
     Ok(())
 }
 
-/// Scan workflow: Add existing works from library_path to database
-fn run_scan_workflow(
+/// Connects the configured VPN if enabled, reusing an already-active tunnel if present.
+/// Used by `--retag`/`--tag`, which each need one DLSite fetch surrounded by connect/disconnect.
+fn connect_vpn_if_enabled(app_config: &Config) -> Result<Option<WireGuardManager>, Box<dyn std::error::Error>> {
+    if !app_config.vpn.enabled {
+        return Ok(None);
+    }
+    let Some(ref wg_config) = app_config.vpn.wireguard else {
+        warn!("VPN enabled but no wireguard config found!");
+        return Ok(None);
+    };
+
+    let mut manager = WireGuardManager::new(wg_config)?;
+    if manager.interface_exists().unwrap_or(false) {
+        info!("VPN already connected, reusing");
+    } else {
+        info!("Connecting VPN...");
+        manager.connect()?;
+    }
+    Ok(Some(manager))
+}
+
+/// Disconnects a VPN manager previously returned by `connect_vpn_if_enabled`, if any.
+fn disconnect_vpn(manager: Option<WireGuardManager>) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(mut m) = manager {
+        info!("Disconnecting VPN...");
+        m.disconnect()?;
+    }
+    Ok(())
+}
+
+/// Phase 1 of a refresh (needs VPN/DLSite access): re-collects tags/CVs/circle/rating/
+/// release_date and caches a fresh cover to `~/.hvtag/covers_cache/`. Only the database and the
+/// cover cache are touched here — no changes to the actual work folder — so this is safe to run
+/// entirely while the VPN is up, mirroring `--full`'s pre-VPN-disconnect collect phase.
+async fn refresh_metadata_and_cache_cover(
+    db: &rusqlite::Connection,
+    rjcode: &RJCode,
+    http_client: &reqwest::Client,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let data_selection = DataSelection {
+        tags: true,
+        release_date: true,
+        circle: true,
+        rating: true,
+        cvs: true,
+        stars: true,
+        cover_link: true,
+    };
+    assign_data_to_work_with_client(db, rjcode.clone(), data_selection, Some(http_client)).await?;
+
+    if let Ok(Some(cover_url)) = queries::get_cover_link(db, rjcode) {
+        if let Err(e) = cover_art::download_cover_to_cache(&cover_url, &rjcode.to_string(), Some((500, 500))).await {
+            warn!("Failed to cache fresh cover for {}: {}", rjcode, e);
+        }
+    }
+    Ok(())
+}
+
+/// Phase 2 of a refresh (no network needed): applies the cached cover (forcing it to replace any
+/// existing one) and re-tags the actual audio files (auto-converting FLAC/WAV/OGG to MP3 first).
+/// Must only run after the VPN has been disconnected — this is what touches the real files, which
+/// may live on a network share that's only reachable once the VPN tunnel is torn back down.
+async fn apply_cover_and_tag(
+    db: &rusqlite::Connection,
+    rjcode: &RJCode,
+    folder_path: String,
+    app_config: &Config,
+    write_tagged_marker: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let folder_path_obj = Path::new(&folder_path);
+    let cover_path = folder_path_obj.join("folder.jpeg");
+    if cover_path.exists() {
+        std::fs::remove_file(&cover_path)?;
+    }
+    if let Err(e) = cover_art::copy_cover_from_cache(&rjcode.to_string(), folder_path_obj) {
+        debug!("No fresh cached cover applied for {}: {}", rjcode, e);
+    }
+
+    let folder = ManagedFolder::new(folder_path);
+    let tagger_config = TaggerConfig {
+        tag_separator: app_config.tagger.get_separator(),
+        convert_to_mp3: true,
+        target_bitrate: 320,
+        download_cover: true,
+        force_retag: true,
+        write_tagged_marker,
+    };
+    process_work_folder(db, &folder, &tagger_config).await?;
+    Ok(())
+}
+
+/// `--retag <rjcode>`: refresh a single work already registered in the library.
+async fn run_retag_workflow(
+    db: &rusqlite::Connection,
+    rjcode: &str,
+    app_config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let rjcode = RJCode::new(rjcode.to_string())?;
+    let folder_path = queries::get_work_path(db, &rjcode)?
+        .ok_or_else(|| format!(
+            "{} not found in the database. Use --tag on its folder in the import directory instead.",
+            rjcode
+        ))?;
+
+    if !converter::is_ffmpeg_available() {
+        return Err("ffmpeg not found in PATH (required for automatic FLAC/WAV/OGG conversion).".into());
+    }
+
+    info!("=== RETAG {} ===", rjcode);
+
+    let vpn_manager = connect_vpn_if_enabled(app_config)?;
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
+    let metadata_result = refresh_metadata_and_cache_cover(db, &rjcode, &http_client).await;
+
+    disconnect_vpn(vpn_manager)?;
+    metadata_result?;
+
+    apply_cover_and_tag(db, &rjcode, folder_path, app_config, true).await?;
+
+    info!("=== RETAG COMPLETE: {} ===", rjcode);
+    Ok(())
+}
+
+/// `--full-retag`: refresh EVERY work already registered in the library — same per-work refresh
+/// as `--retag`, looped over the whole database. Connects the VPN once for the entire batch
+/// rather than once per work (reconnecting per work would be needlessly slow for hundreds of
+/// works). Continues past individual failures (e.g. a work whose folder no longer exists on
+/// disk) so one bad work doesn't abort the whole batch; failures are reported in the summary.
+async fn run_full_retag_workflow(
     db: &rusqlite::Connection,
     app_config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let library_path = app_config.import.library_path.as_ref()
-        .ok_or_else(|| errors::HvtError::Generic(
-            "Please configure import.library_path in config.toml".to_string()
-        ))?;
+    if !converter::is_ffmpeg_available() {
+        return Err("ffmpeg not found in PATH (required for automatic FLAC/WAV/OGG conversion).".into());
+    }
 
-    info!("=== SCAN WORKFLOW ===");
-    info!("Library: {}", library_path);
-
-    // Scan library directory for RJ folders
-    info!("\n--- Scanning library directory ---");
-    let library_folders = get_list_of_folders(library_path)?;
-
-    if library_folders.is_empty() {
-        info!("No valid RJ folders found in library directory");
+    let works = queries::get_all_works_with_paths(db)?;
+    if works.is_empty() {
+        info!("No works in database");
         return Ok(());
     }
 
-    info!("Found {} folder(s) in library", library_folders.len());
+    info!("=== FULL RETAG: {} work(s) ===", works.len());
 
-    // Get existing works from database
-    let existing_works: std::collections::HashSet<String> = queries::get_all_works(db)?
-        .into_iter()
-        .map(|rj| rj.to_string())
-        .collect();
+    // ===== VPN PHASE: refresh DB metadata + cache fresh covers for every work =====
+    // Only the database and the cover cache are touched here, exactly like `--full`'s collect
+    // phase — the VPN is torn down before any of the actual work folders are touched below.
+    let vpn_manager = connect_vpn_if_enabled(app_config)?;
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
 
-    // Filter to only new works
-    let new_folders: Vec<_> = library_folders
-        .into_iter()
-        .filter(|f| !existing_works.contains(&f.rjcode.to_string()))
-        .collect();
+    info!("\n--- Fetching metadata ({} work(s)) ---", works.len());
+    let pb = create_progress_bar(works.len() as u64);
+    let mut metadata_ok: Vec<bool> = Vec::with_capacity(works.len());
 
-    if new_folders.is_empty() {
-        info!("All folders are already registered in database");
-        return Ok(());
-    }
-
-    info!("Found {} new folder(s) to register", new_folders.len());
-
-    // Register new folders
-    let pb = create_progress_bar(new_folders.len() as u64);
-    let mut registered = 0;
-
-    for folder in &new_folders {
-        pb.set_message(format!("Registering {}", folder.rjcode));
-
-        match register_folders(db, vec![folder.clone()]) {
+    for (rjcode, _) in &works {
+        pb.set_message(format!("Fetching {}", rjcode));
+        match refresh_metadata_and_cache_cover(db, rjcode, &http_client).await {
             Ok(_) => {
-                pb.println(&format!("{} ✓", folder.rjcode));
-                registered += 1;
+                pb.println(format!("{} ✓", rjcode));
+                metadata_ok.push(true);
             }
             Err(e) => {
-                warn!("Failed to register {}: {}", folder.rjcode, e);
-                pb.println(&format!("{} ✗", folder.rjcode));
+                warn!("Failed to refresh metadata for {}: {}", rjcode, e);
+                pb.println(format!("{} ✗", rjcode));
+                metadata_ok.push(false);
+            }
+        }
+        pb.inc(1);
+    }
+    pb.finish_and_clear();
+
+    disconnect_vpn(vpn_manager)?;
+
+    // ===== POST-VPN PHASE: apply cached covers + re-tag files, VPN is down =====
+    info!("\n--- Tagging files ({} work(s)) ---", works.len());
+    let pb = create_progress_bar(works.len() as u64);
+    let mut success = 0usize;
+    let mut failed = 0usize;
+
+    for ((rjcode, folder_path), was_ok) in works.into_iter().zip(metadata_ok.into_iter()) {
+        pb.set_message(format!("Tagging {}", rjcode));
+
+        if !was_ok {
+            // Metadata refresh already failed for this work; skip tagging and count it once.
+            pb.println(format!("{} ✗ (metadata fetch failed)", rjcode));
+            failed += 1;
+            pb.inc(1);
+            continue;
+        }
+
+        match apply_cover_and_tag(db, &rjcode, folder_path, app_config, true).await {
+            Ok(_) => {
+                pb.println(format!("{} ✓", rjcode));
+                success += 1;
+            }
+            Err(e) => {
+                warn!("Failed to tag {}: {}", rjcode, e);
+                pb.println(format!("{} ✗", rjcode));
+                failed += 1;
             }
         }
 
@@ -208,85 +336,82 @@ fn run_scan_workflow(
     }
 
     pb.finish_and_clear();
-    info!("\n=== SCAN COMPLETE ===");
-    info!("Registered: {} new work(s)", registered);
 
+    info!("=== FULL RETAG COMPLETE: {} succeeded, {} failed ===", success, failed);
     Ok(())
 }
 
-/// Standalone workflow for existing works in database
-async fn run_standalone_workflow(
+/// `--tag <folder_name>`: one-shot test run of the full process against a folder sitting in the
+/// import directory — collects DLSite metadata, downloads a cover, tags the files (converting
+/// FLAC/WAV/OGG first) — but does NOT move the folder and does NOT leave anything in the
+/// database. The folder is registered temporarily so the existing DLSite-fetch and
+/// custom-mapping-merge machinery (all keyed on fld_id) works unmodified, then fully removed
+/// again at the end regardless of success or failure.
+async fn run_tag_test_workflow(
     db: &rusqlite::Connection,
-    args: &PrgmArgs,
+    folder_name: &str,
     app_config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!("=== STANDALONE WORKFLOW (existing works) ===");
-
-    // Identify works that need cover downloads
-    let works_needing_covers = if args.image {
-        identify_works_needing_covers(db)?
-    } else {
-        vec![]
-    };
-
-    // Get all works with cover links from database (for tagging)
-    let all_works_with_covers = queries::get_all_works_with_cover_links(db)?;
-
-    // Setup VPN if needed for network operations
-    let needs_vpn = args.collect || (args.image && !works_needing_covers.is_empty());
-    let mut vpn_manager: Option<vpn::wireguard::WireGuardManager> = None;
-
-    debug!("VPN check: needs_vpn={}, vpn.enabled={}, wireguard={:?}",
-           needs_vpn, app_config.vpn.enabled, app_config.vpn.wireguard.is_some());
-
-    if needs_vpn && app_config.vpn.enabled {
-        if let Some(ref wg_config) = app_config.vpn.wireguard {
-            info!("Connecting VPN...");
-            let mut manager = vpn::wireguard::WireGuardManager::new(wg_config)?;
-            manager.connect()?;
-            vpn_manager = Some(manager);
-        } else {
-            warn!("VPN enabled but no wireguard config found!");
-        }
-    } else if needs_vpn {
-        info!("VPN needed but disabled in config, skipping...");
+    let source_path = app_config.import.source_path.as_ref()
+        .ok_or("import.source_path is not configured in config.toml")?;
+    let folder_path = Path::new(source_path).join(folder_name);
+    if !folder_path.is_dir() {
+        return Err(format!("Folder not found in import directory: {}", folder_path.display()).into());
     }
 
+    let folder = ManagedFolder::new(folder_path.to_string_lossy().to_string());
+    if !folder.is_valid {
+        return Err(format!(
+            "'{}' is not a valid work folder (needs an RJ/VJ-prefixed name and audio files)",
+            folder_name
+        ).into());
+    }
+
+    if queries::rjcode_exists(db, &folder.rjcode)? {
+        return Err(format!(
+            "{} is already registered in the database — use --retag {} instead.",
+            folder.rjcode, folder.rjcode
+        ).into());
+    }
+
+    if !converter::is_ffmpeg_available() {
+        return Err("ffmpeg not found in PATH (required for automatic FLAC/WAV/OGG conversion).".into());
+    }
+
+    info!("=== TAG TEST (one-shot, no DB/move): {} ===", folder.rjcode);
+
+    register_folders(db, vec![folder.clone()])?;
+
+    let result = run_tag_test_inner(db, &folder, app_config).await;
+
+    // Cleanup regardless of success/failure. Shared reference rows (dlsite_tag/circles/cvs
+    // themselves) are correctly left untouched — only this fld_id's lkp_* rows disappear.
+    queries::delete_work_permanently(db, &folder.rjcode)?;
+
+    result?;
+    info!(
+        "=== TAG TEST COMPLETE: {}. Files updated in place; not moved, database not modified. ===",
+        folder.rjcode
+    );
+    Ok(())
+}
+
+async fn run_tag_test_inner(
+    db: &rusqlite::Connection,
+    folder: &ManagedFolder,
+    app_config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let vpn_manager = connect_vpn_if_enabled(app_config)?;
     let http_client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
 
-    // --collect: Fetch metadata for works in database
-    if args.collect {
-        step2_fetch_metadata(db, args, &http_client).await?;
-    }
+    let metadata_result = refresh_metadata_and_cache_cover(db, &folder.rjcode, &http_client).await;
 
-    // --image: Download covers for works in database
-    if args.image && !works_needing_covers.is_empty() {
-        step2_download_images_filtered(db, &works_needing_covers).await?;
-    }
+    disconnect_vpn(vpn_manager)?;
+    metadata_result?;
 
-    // Disconnect VPN after network operations
-    if let Some(ref mut manager) = vpn_manager {
-        info!("Disconnecting VPN...");
-        manager.disconnect()?;
-    }
-
-    // --convert (standalone): Convert non-MP3 files to MP3 without tagging
-    // When combined with --tag, this runs first so the tag pipeline finds only MP3s
-    if args.convert {
-        step_convert_files(db).await?;
-    }
-
-    // --tag / --apply: Tag files for works in database
-    if args.tag || args.apply {
-        // First copy cached covers to folders
-        step_copy_cached_covers(&all_works_with_covers)?;
-        // Then tag (convert_to_mp3 in TaggerConfig will be a no-op if --convert already ran)
-        step3_tag_files(db, args, app_config).await?;
-    }
-
-    info!("=== DONE ===");
+    apply_cover_and_tag(db, &folder.rjcode, folder.path.clone(), app_config, false).await?;
     Ok(())
 }
 
@@ -301,395 +426,6 @@ fn create_progress_bar(len: u64) -> ProgressBar {
             .progress_chars("=>-")
     );
     pb
-}
-
-/// Step 2: Fetch metadata from DLSite
-async fn step2_fetch_metadata(
-    db: &rusqlite::Connection,
-    args: &PrgmArgs,
-    http_client: &reqwest::Client,
-) -> Result<(), Box<dyn std::error::Error>> {
-    info!("=== STEP 2: FETCHING METADATA FROM DLSITE ===");
-
-    // Build data selection based on CLI args
-    let data_selection = DataSelection {
-        tags: args.collect,
-        release_date: args.collect,
-        circle: args.collect,
-        rating: args.collect,
-        cvs: args.collect,
-        stars: args.collect,
-        cover_link: args.collect,  // Always fetch cover links when collecting metadata
-    };
-
-    // Get works to process
-    let works = if args.rjcode.is_some() {
-        // Process only specified RJCode
-        vec![RJCode::new(args.rjcode.as_ref().unwrap().clone())?]
-    } else {
-        // Process all unscanned works
-        get_list_of_unscanned_works(db, None)?
-    };
-
-    info!("Processing {} work(s)", works.len());
-
-    // Create progress bar
-    let pb = create_progress_bar(works.len() as u64);
-
-    for work in works {
-        pb.set_message(format!("Fetching {}", work));
-
-        let result_msg = match assign_data_to_work_with_client(db, work.clone(), data_selection.clone(), Some(http_client)).await {
-            Ok(_) => {
-                format!("{} ✓", work)
-            }
-            Err(errors::HvtError::RemovedWork(rjcode)) => {
-                if let Err(e) = queries::insert_error(db, &rjcode, "removed work", Some("dlsite_removed")) {
-                    warn!("Failed to log error for {}: {}", work, e);
-                }
-                format!("{} (removed)", work)
-            }
-            Err(e) => {
-                error!("Error fetching metadata for {}: {}", work, e);
-                if let Err(err) = queries::insert_error(db, &work, &e.to_string(), Some("fetch_error")) {
-                    warn!("Failed to log error for {}: {}", work, err);
-                }
-                format!("{} ✗", work)
-            }
-        };
-
-        pb.println(&result_msg);
-        pb.inc(1);
-    }
-
-    pb.finish_and_clear();
-
-    Ok(())
-}
-
-/// Pre-scan phase: Identify works that need covers BEFORE VPN connects
-/// This allows checking local/network filesystems before they become unavailable
-fn identify_works_needing_covers(
-    db: &rusqlite::Connection,
-) -> Result<Vec<(RJCode, String, String)>, Box<dyn std::error::Error>> {
-    // Get all works with cover links
-    let works_with_covers = queries::get_all_works_with_cover_links(db)?;
-
-    if works_with_covers.is_empty() {
-        info!("No works with cover links found in database");
-        return Ok(Vec::new());
-    }
-
-    let mut works_needing_covers = Vec::new();
-
-    for (work, folder_path, cover_url) in works_with_covers {
-        let folder_path_obj = Path::new(&folder_path);
-
-        // Skip if folder doesn't exist
-        if !folder_path_obj.exists() {
-            debug!("Folder not found: {} ({})", work, folder_path);
-            continue;
-        }
-
-        // Skip if cover already exists
-        if cover_art::has_cover_art(folder_path_obj) {
-            debug!("Cover already exists: {} ({})", work, folder_path);
-            continue;
-        }
-
-        // This work needs a cover
-        works_needing_covers.push((work, folder_path, cover_url));
-    }
-
-    if !works_needing_covers.is_empty() {
-        info!("Found {} work(s) needing covers", works_needing_covers.len());
-    }
-
-    Ok(works_needing_covers)
-}
-
-/// Step 2b: Download cover images to local cache (VPN phase)
-async fn step2_download_images_filtered(
-    db: &rusqlite::Connection,
-    works_to_download: &[(RJCode, String, String)],
-) -> Result<(), Box<dyn std::error::Error>> {
-    info!("=== DOWNLOADING COVER IMAGES TO CACHE ===");
-
-    if works_to_download.is_empty() {
-        info!("No covers to download (all works already have covers)");
-        return Ok(());
-    }
-
-    info!("Downloading {} cover(s) to local cache...", works_to_download.len());
-
-    // Create progress bar
-    let pb = create_progress_bar(works_to_download.len() as u64);
-
-    let mut downloaded = 0;
-    let mut failed = 0;
-
-    for (work, _folder_path, cover_url) in works_to_download {
-        pb.set_message(format!("Downloading {}", work));
-
-        let result_msg = match cover_art::download_cover_to_cache(
-            cover_url,
-            work.as_str(),
-            None,  // Keep original dimensions from DLSite
-        ).await {
-            Ok(_cache_path) => {
-                downloaded += 1;
-                format!("{} ✓", work)
-            }
-            Err(e) => {
-                warn!("Failed to download cover for {}: {}", work, e);
-                failed += 1;
-                format!("{} ✗", work)
-            }
-        };
-
-        pb.println(&result_msg);
-        pb.inc(1);
-    }
-
-    pb.finish_and_clear();
-    info!("Covers cached: {} | Failed: {}", downloaded, failed);
-
-    Ok(())
-}
-
-/// Post-VPN: Copy cached covers to their final folder destinations
-fn step_copy_cached_covers(
-    works_with_covers: &[(RJCode, String, String)],
-) -> Result<(), Box<dyn std::error::Error>> {
-    if works_with_covers.is_empty() {
-        return Ok(());
-    }
-
-    info!("\n=== COPYING CACHED COVERS TO FOLDERS ===");
-    info!("Copying {} cover(s) from cache...", works_with_covers.len());
-
-    // Create progress bar
-    let pb = create_progress_bar(works_with_covers.len() as u64);
-
-    let mut copied = 0;
-    let mut failed = 0;
-
-    for (work, folder_path, _cover_url) in works_with_covers {
-        pb.set_message(format!("Copying {}", work));
-        let folder_path_obj = Path::new(folder_path);
-
-        // Skip if folder doesn't exist
-        if !folder_path_obj.exists() {
-            debug!("Folder not found, skipping: {}", folder_path);
-            pb.println(&format!("{} (folder not found)", work));
-            failed += 1;
-            pb.inc(1);
-            continue;
-        }
-
-        let result_msg = match cover_art::copy_cover_from_cache(work.as_str(), folder_path_obj) {
-            Ok(_) => {
-                copied += 1;
-                format!("{} ✓", work)
-            }
-            Err(e) => {
-                warn!("Failed to copy cover for {}: {}", work, e);
-                failed += 1;
-                format!("{} ✗", work)
-            }
-        };
-
-        pb.println(&result_msg);
-        pb.inc(1);
-    }
-
-    pb.finish_and_clear();
-    info!("Covers copied: {} | Failed: {}", copied, failed);
-
-    Ok(())
-}
-
-/// Convert non-MP3 audio files (FLAC, WAV, OGG) to MP3 for all works in database
-async fn step_convert_files(
-    db: &rusqlite::Connection,
-) -> Result<(), Box<dyn std::error::Error>> {
-    info!("=== CONVERTING AUDIO FILES TO MP3 ===");
-
-    if !converter::is_ffmpeg_available() {
-        error!("FFmpeg not found in PATH. Please install FFmpeg to use --convert.");
-        return Err(Box::new(errors::HvtError::AudioConversion(
-            "FFmpeg not found in PATH. Please install FFmpeg: https://ffmpeg.org/".to_string(),
-        )));
-    }
-
-    let target_bitrate: u32 = 320;
-    let non_mp3_ext = ["flac", "wav", "ogg"];
-
-    let works_with_paths = queries::get_all_works_with_paths(db)?;
-
-    if works_with_paths.is_empty() {
-        info!("No works in database");
-        return Ok(());
-    }
-
-    // Pre-scan: collect only works that have non-MP3 files
-    let mut works_to_convert: Vec<(RJCode, Vec<std::path::PathBuf>)> = Vec::new();
-
-    for (rjcode, folder_path) in &works_with_paths {
-        let folder = std::path::Path::new(folder_path);
-        if !folder.exists() {
-            continue;
-        }
-        let mut files: Vec<std::path::PathBuf> = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(folder) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if !path.is_file() {
-                    continue;
-                }
-                let ext = path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                if non_mp3_ext.contains(&ext.as_str()) {
-                    files.push(path);
-                }
-            }
-        }
-        if !files.is_empty() {
-            works_to_convert.push((rjcode.clone(), files));
-        }
-    }
-
-    if works_to_convert.is_empty() {
-        info!("No non-MP3 files found, nothing to convert");
-        return Ok(());
-    }
-
-    let total_files: usize = works_to_convert.iter().map(|(_, f)| f.len()).sum();
-    info!(
-        "Found {} work(s) with {} file(s) to convert",
-        works_to_convert.len(),
-        total_files
-    );
-
-    let pb = create_progress_bar(total_files as u64);
-    let mut converted = 0usize;
-    let mut failed = 0usize;
-
-    for (rjcode, files) in &works_to_convert {
-        for file_path in files {
-            let filename = file_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string();
-            pb.set_message(format!("{} — {}", rjcode, filename));
-
-            match converter::convert_to_mp3_in_place(file_path, target_bitrate).await {
-                Ok(_) => {
-                    pb.println(format!("{}/{} ✓", rjcode, filename));
-                    converted += 1;
-                }
-                Err(e) => {
-                    warn!("Failed to convert {}/{}: {}", rjcode, filename, e);
-                    pb.println(format!("{}/{} ✗", rjcode, filename));
-                    failed += 1;
-                }
-            }
-
-            pb.inc(1);
-        }
-    }
-
-    pb.finish_and_clear();
-    info!("Converted: {} | Failed: {}", converted, failed);
-
-    Ok(())
-}
-
-/// Step 3: Tag and convert audio files
-async fn step3_tag_files(
-    db: &rusqlite::Connection,
-    args: &PrgmArgs,
-    app_config: &Config,
-) -> Result<(), Box<dyn std::error::Error>> {
-    info!("\n=== STEP 3: TAGGING AUDIO FILES ===");
-
-    // Create tagger config from CLI arguments and app config
-    let tagger_config = TaggerConfig {
-        convert_to_mp3: args.convert,
-        target_bitrate: 320,
-        download_cover: args.image,
-        tag_separator: app_config.tagger.get_separator(),
-        force_retag: args.force,
-    };
-
-    // Get works to process with their paths
-    let works_with_paths: Vec<(RJCode, String)> = if let Some(ref rjcode) = args.rjcode {
-        // For specific RJCode, use current directory
-        let path = std::env::current_dir()?.to_string_lossy().to_string();
-        vec![(RJCode::new(rjcode.clone())?, path)]
-    } else {
-        // Pre-filter: only works that actually need tagging, so the progress bar
-        // reflects real work to do rather than the full DB size.
-        queries::get_all_works_with_paths(db)?
-            .into_iter()
-            .filter(|(rjcode, path)| {
-                if tagger_config.force_retag {
-                    return true;
-                }
-                let folder = ManagedFolder::new(path.clone());
-                if !folder.is_tagged {
-                    return true;
-                }
-                let needs_retag_tags =
-                    crate::database::custom_tags::should_retag_work(db, rjcode)
-                        .unwrap_or(false);
-                let needs_retag_circle =
-                    crate::database::custom_circles::should_retag_work_for_circle(db, rjcode)
-                        .unwrap_or(false);
-                needs_retag_tags || needs_retag_circle
-            })
-            .collect()
-    };
-
-    info!("Processing {} work(s)", works_with_paths.len());
-
-    // Create progress bar
-    let pb = create_progress_bar(works_with_paths.len() as u64);
-
-    for (work, folder_path) in works_with_paths {
-        pb.set_message(format!("Tagging {}", work));
-
-        if !std::path::Path::new(&folder_path).exists() {
-            warn!("Folder not found: {}", folder_path);
-            pb.println(&format!("{} (folder not found)", work));
-            pb.inc(1);
-            continue;
-        }
-
-        let folder = ManagedFolder::new(folder_path.clone());
-
-        let result_msg = match process_work_folder(db, &folder, &tagger_config).await {
-            Ok(_) => {
-                format!("{} ✓", work)
-            }
-            Err(e) => {
-                warn!("Failed to tag {}: {}", work, e);
-                format!("{} ✗", work)
-            }
-        };
-
-        pb.println(&result_msg);
-        pb.inc(1);
-    }
-
-    pb.finish_and_clear();
-    info!("Tagging completed");
-
-    Ok(())
 }
 
 /// Move folder with cross-drive support (copy + delete fallback)
@@ -748,7 +484,6 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), errors::HvtError> {
 /// Import workflow: scan source -> process -> move to library
 async fn run_import_workflow(
     db: &rusqlite::Connection,
-    args: &PrgmArgs,
     app_config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Validate config
@@ -822,10 +557,9 @@ async fn run_import_workflow(
         }
     }
 
-    // Check if we need VPN
-    let needs_vpn = args.collect || args.image;
-
     // ========== VPN PHASE ==========
+    // --full always collects metadata and downloads covers, so VPN is always needed.
+    let needs_vpn = true;
     let mut vpn_manager: Option<WireGuardManager> = None;
 
     if needs_vpn && app_config.vpn.enabled {
@@ -856,8 +590,8 @@ async fn run_import_workflow(
         .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         .build()?;
 
-    // Collect metadata if requested
-    if args.collect {
+    // Collect metadata (--full always does this)
+    {
         info!("\n--- Fetching metadata ---");
         let data_selection = DataSelection {
             tags: true,
@@ -895,8 +629,8 @@ async fn run_import_workflow(
         pb.finish_and_clear();
     }
 
-    // Download covers if requested
-    if args.image {
+    // Download covers (--full always does this)
+    {
         info!("\n--- Downloading covers ---");
 
         // Filter folders that need covers (don't have folder.jpeg yet)
@@ -937,7 +671,7 @@ async fn run_import_workflow(
     // ========== POST-VPN PHASE ==========
 
     // Copy covers from cache to source folders (only for folders that don't have covers)
-    if args.image {
+    {
         info!("\n--- Copying covers to folders ---");
         for folder in &folders_to_process {
             let folder_path = Path::new(&folder.path);
@@ -954,15 +688,16 @@ async fn run_import_workflow(
         }
     }
 
-    // Tag files if requested
-    if args.tag || args.apply {
+    // Tag files (--full always does this)
+    {
         info!("\n--- Tagging files ---");
         let tagger_config = TaggerConfig {
             tag_separator: app_config.tagger.get_separator(),
-            convert_to_mp3: args.convert,
+            convert_to_mp3: false,
             target_bitrate: 320,
-            download_cover: args.image,
-            force_retag: args.force,
+            download_cover: true,
+            force_retag: false,
+            write_tagged_marker: true,
         };
 
         let pb = create_progress_bar(folders_to_process.len() as u64);

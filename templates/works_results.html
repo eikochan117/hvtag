@@ -1,0 +1,73 @@
+{% let common_include = "#search-q, #filter-tag, #filter-circle, #filter-cv" %}
+
+<div class="works-toolbar">
+  <select id="sort-select" name="sort"
+          hx-get="/works/search"
+          hx-trigger="change"
+          hx-target="#work-results"
+          hx-include="{{ common_include }}, #cur-view"
+          hx-push-url="true">
+    <option value="title" {% if sort == "title" %}selected{% endif %}>Sort: Title</option>
+    <option value="circle" {% if sort == "circle" %}selected{% endif %}>Sort: Circle</option>
+    <option value="rjcode" {% if sort == "rjcode" %}selected{% endif %}>Sort: RJ Code</option>
+    <option value="rating" {% if sort == "rating" %}selected{% endif %}>Sort: Rating</option>
+  </select>
+
+  <div class="view-toggle">
+    <button type="button" class="{% if view == "grid" %}active{% endif %}"
+            hx-get="/works/search" hx-target="#work-results" hx-push-url="true"
+            hx-include="{{ common_include }}, #cur-sort" hx-vals='{"view": "grid"}'>Grid</button>
+    <button type="button" class="{% if view == "table" %}active{% endif %}"
+            hx-get="/works/search" hx-target="#work-results" hx-push-url="true"
+            hx-include="{{ common_include }}, #cur-sort" hx-vals='{"view": "table"}'>Table</button>
+  </div>
+</div>
+<input type="hidden" id="cur-sort" name="sort" value="{{ sort }}">
+<input type="hidden" id="cur-view" name="view" value="{{ view }}">
+
+{% if works.is_empty() %}
+<p>No works found{% if !q.is_empty() %} for &ldquo;{{ q }}&rdquo;{% endif %}.</p>
+{% else if view == "table" %}
+<div class="table-scroll">
+<table class="works-table">
+<thead><tr>
+  <th></th>
+  <th><a class="sort-link" hx-get="/works/search" hx-vals='{"sort":"rjcode"}' hx-include="{{ common_include }}, #cur-view" hx-target="#work-results" hx-push-url="true">RJ Code{% if sort == "rjcode" %} &#9660;{% endif %}</a></th>
+  <th><a class="sort-link" hx-get="/works/search" hx-vals='{"sort":"title"}' hx-include="{{ common_include }}, #cur-view" hx-target="#work-results" hx-push-url="true">Title{% if sort == "title" %} &#9660;{% endif %}</a></th>
+  <th><a class="sort-link" hx-get="/works/search" hx-vals='{"sort":"circle"}' hx-include="{{ common_include }}, #cur-view" hx-target="#work-results" hx-push-url="true">Circle{% if sort == "circle" %} &#9660;{% endif %}</a></th>
+  <th><a class="sort-link" hx-get="/works/search" hx-vals='{"sort":"rating"}' hx-include="{{ common_include }}, #cur-view" hx-target="#work-results" hx-push-url="true">Rating{% if sort == "rating" %} &#9660;{% endif %}</a></th>
+</tr></thead>
+<tbody>
+{% for w in works %}
+<tr>
+  <td><a href="/works/{{ w.rjcode }}"><img class="table-thumb" data-cover-src="/covers/{{ w.rjcode }}" alt="{{ w.name }}" loading="lazy"></a></td>
+  <td><a href="/works/{{ w.rjcode }}">{{ w.rjcode }}</a></td>
+  <td><a href="/works/{{ w.rjcode }}">{{ w.name }}</a></td>
+  <td>{{ w.circle_name }}</td>
+  <td>{% if let Some(stars) = w.stars %}&#9733; {{ stars }}{% else %}&mdash;{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% else %}
+<div class="work-grid">
+  {% for w in works %}
+  <a class="work-card" href="/works/{{ w.rjcode }}">
+    <img data-cover-src="/covers/{{ w.rjcode }}" alt="{{ w.name }}" loading="lazy">
+    <div class="name">{{ w.name }}</div>
+    <div class="circle">{{ w.circle_name }}{% if let Some(stars) = w.stars %} &middot; &#9733; {{ stars }}{% endif %}</div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="pagination">
+  {% if page > 1 %}
+  <button hx-get="/works/search?page={{ page - 1 }}" hx-include="{{ common_include }}, #cur-sort, #cur-view" hx-target="#work-results" hx-push-url="true">&larr; Prev</button>
+  {% endif %}
+  <span>Page {{ page }} / {{ total_pages }}</span>
+  {% if page < total_pages %}
+  <button hx-get="/works/search?page={{ page + 1 }}" hx-include="{{ common_include }}, #cur-sort, #cur-view" hx-target="#work-results" hx-push-url="true">Next &rarr;</button>
+  {% endif %}
+</div>

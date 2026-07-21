@@ -43,7 +43,7 @@ pub fn run_interactive_tag_manager(conn: &Connection) -> Result<(), HvtError> {
 }
 
 fn view_all_tags(conn: &Connection) -> Result<(), HvtError> {
-    let tags = custom_tags::list_all_dlsite_tags_with_counts(conn)?;
+    let tags = custom_tags::list_all_dlsite_tags_with_counts(conn, custom_tags::DEFAULT_TAG_SORT)?;
 
     if tags.is_empty() {
         println!("\nNo tags found in database.");
@@ -68,7 +68,7 @@ fn view_all_tags(conn: &Connection) -> Result<(), HvtError> {
 }
 
 fn rename_tag(conn: &Connection) -> Result<(), HvtError> {
-    let tags = custom_tags::list_all_dlsite_tags_with_counts(conn)?;
+    let tags = custom_tags::list_all_dlsite_tags_with_counts(conn, custom_tags::DEFAULT_TAG_SORT)?;
 
     if tags.is_empty() {
         println!("\nNo tags found in database.");
@@ -166,7 +166,7 @@ fn rename_tag(conn: &Connection) -> Result<(), HvtError> {
 }
 
 fn ignore_tag(conn: &Connection) -> Result<(), HvtError> {
-    let tags = custom_tags::list_all_dlsite_tags_with_counts(conn)?;
+    let tags = custom_tags::list_all_dlsite_tags_with_counts(conn, custom_tags::DEFAULT_TAG_SORT)?;
 
     if tags.is_empty() {
         println!("\nNo tags found in database.");
@@ -250,7 +250,7 @@ fn ignore_tag(conn: &Connection) -> Result<(), HvtError> {
 }
 
 fn unignore_tag(conn: &Connection) -> Result<(), HvtError> {
-    let tags = custom_tags::list_all_dlsite_tags_with_counts(conn)?;
+    let tags = custom_tags::list_all_dlsite_tags_with_counts(conn, custom_tags::DEFAULT_TAG_SORT)?;
 
     // Filter to only ignored tags
     let ignored_tags: Vec<_> = tags.iter()
@@ -313,7 +313,7 @@ fn unignore_tag(conn: &Connection) -> Result<(), HvtError> {
 }
 
 fn bulk_ignore_tags_below_threshold(conn: &Connection) -> Result<(), HvtError> {
-    let tags = custom_tags::list_all_dlsite_tags_with_counts(conn)?;
+    let tags = custom_tags::list_all_dlsite_tags_with_counts(conn, custom_tags::DEFAULT_TAG_SORT)?;
 
     if tags.is_empty() {
         println!("\nNo tags found in database.");

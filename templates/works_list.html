@@ -1,0 +1,24 @@
+{% extends "layout.html" %}
+{% block title %}Works — hvtag{% endblock %}
+{% block content %}
+<h1>Works</h1>
+{% if let Some(label) = active_filter %}
+<div class="active-filter">
+  Filtered by: <strong>{{ label }}</strong>
+  <a href="/works">&times; clear</a>
+</div>
+{% endif %}
+<input type="search" id="search-q" name="q" value="{{ q }}"
+       placeholder="Search title, RJ code, circle, or tag..."
+       hx-get="/works/search"
+       hx-trigger="keyup changed delay:400ms, search"
+       hx-target="#work-results"
+       hx-include="#filter-tag, #filter-circle, #filter-cv, #cur-sort, #cur-view"
+       hx-push-url="true">
+<input type="hidden" id="filter-tag" name="tag" value="{% if let Some(t) = tag %}{{ t }}{% endif %}">
+<input type="hidden" id="filter-circle" name="circle" value="{% if let Some(c) = circle %}{{ c }}{% endif %}">
+<input type="hidden" id="filter-cv" name="cv" value="{% if let Some(c) = cv %}{{ c }}{% endif %}">
+<div id="work-results">
+{{ results_html|safe }}
+</div>
+{% endblock %}

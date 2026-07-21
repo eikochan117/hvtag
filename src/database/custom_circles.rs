@@ -33,20 +33,35 @@ impl CirclePreferenceType {
     }
 }
 
-/// List all circles in the database (alphabetically sorted)
+/// Bare (no ASC/DESC) SQL expression for a circle's default display name (JP, falling back to
+/// EN, falling back to the RG code) — used both as the default sort column and as a tie-breaker
+/// for other sort columns.
+pub const CIRCLE_NAME_EXPR: &str = "
+    CASE
+        WHEN c.name_jp IS NOT NULL AND c.name_jp != '' THEN c.name_jp
+        WHEN c.name_en IS NOT NULL AND c.name_en != '' THEN c.name_en
+        ELSE c.rgcode
+    END";
+
+/// Default sort for `list_all_circles` — alphabetical by display name.
+pub const DEFAULT_CIRCLE_SORT: &str = "
+    CASE
+        WHEN c.name_jp IS NOT NULL AND c.name_jp != '' THEN c.name_jp
+        WHEN c.name_en IS NOT NULL AND c.name_en != '' THEN c.name_en
+        ELSE c.rgcode
+    END ASC";
+
+/// List all circles in the database. `order_by` is a caller-supplied, pre-whitelisted SQL
+/// `ORDER BY` fragment (see `web/routes/circles.rs` for the web UI's column-sort whitelist) —
+/// never built from raw user input.
 /// Returns Vec<(cir_id, rgcode, name_en, name_jp, pref_type?, custom_name?)>
-pub fn list_all_circles(conn: &Connection) -> Result<Vec<(i64, String, String, String, Option<String>, Option<String>)>, HvtError> {
+pub fn list_all_circles(conn: &Connection, order_by: &str) -> Result<Vec<(i64, String, String, String, Option<String>, Option<String>)>, HvtError> {
     let mut stmt = conn.prepare(
         &format!(
             "SELECT c.cir_id, c.rgcode, c.name_en, c.name_jp, ccm.preference_type, ccm.custom_name
              FROM {DB_CIRCLE_NAME} c
              LEFT JOIN {DB_CUSTOM_CIRCLE_MAPPINGS_NAME} ccm ON c.cir_id = ccm.cir_id
-             ORDER BY
-                 CASE
-                     WHEN c.name_jp IS NOT NULL AND c.name_jp != '' THEN c.name_jp
-                     WHEN c.name_en IS NOT NULL AND c.name_en != '' THEN c.name_en
-                     ELSE c.rgcode
-                 END ASC"
+             ORDER BY {order_by}"
         )
     )?;
 

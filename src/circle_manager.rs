@@ -37,7 +37,7 @@ pub fn run_interactive_circle_manager(conn: &Connection) -> Result<(), HvtError>
 }
 
 fn view_all_circles(conn: &Connection) -> Result<(), HvtError> {
-    let circles = custom_circles::list_all_circles(conn)?;
+    let circles = custom_circles::list_all_circles(conn, custom_circles::DEFAULT_CIRCLE_SORT)?;
 
     if circles.is_empty() {
         println!("\nNo circles found in database.");
@@ -85,7 +85,7 @@ fn view_all_circles(conn: &Connection) -> Result<(), HvtError> {
 }
 
 fn set_circle_preference(conn: &Connection) -> Result<(), HvtError> {
-    let circles = custom_circles::list_all_circles(conn)?;
+    let circles = custom_circles::list_all_circles(conn, custom_circles::DEFAULT_CIRCLE_SORT)?;
 
     if circles.is_empty() {
         println!("\nNo circles found in database.");

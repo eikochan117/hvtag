@@ -30,9 +30,14 @@ pub fn list_all_dlsite_tags(conn: &Connection) -> Result<Vec<(i64, String, Optio
     Ok(tags)
 }
 
-/// List all DLSite tags with work counts (alphabetically sorted)
+/// Default sort for `list_all_dlsite_tags_with_counts` — alphabetical by DLSite tag name.
+pub const DEFAULT_TAG_SORT: &str = "dt.tag_name ASC";
+
+/// List all DLSite tags with work counts. `order_by` is a caller-supplied, pre-whitelisted SQL
+/// `ORDER BY` fragment (see `web/routes/tags.rs` for the web UI's column-sort whitelist) — never
+/// built from raw user input.
 /// Returns Vec<(tag_id, tag_name, custom_name_if_mapped, is_ignored, work_count)>
-pub fn list_all_dlsite_tags_with_counts(conn: &Connection) -> Result<Vec<(i64, String, Option<String>, bool, i64)>, HvtError> {
+pub fn list_all_dlsite_tags_with_counts(conn: &Connection, order_by: &str) -> Result<Vec<(i64, String, Option<String>, bool, i64)>, HvtError> {
     let mut stmt = conn.prepare(
         &format!(
             "SELECT dt.tag_id, dt.tag_name, ctm.custom_tag_name, COALESCE(ctm.is_ignored, 0),
@@ -41,7 +46,7 @@ pub fn list_all_dlsite_tags_with_counts(conn: &Connection) -> Result<Vec<(i64, S
              LEFT JOIN {DB_CUSTOM_TAG_MAPPINGS_NAME} ctm ON dt.tag_id = ctm.dlsite_tag_id
              LEFT JOIN {DB_LKP_WORK_TAG_NAME} lwt ON dt.tag_id = lwt.tag_id
              GROUP BY dt.tag_id, dt.tag_name, ctm.custom_tag_name, ctm.is_ignored
-             ORDER BY dt.tag_name ASC"
+             ORDER BY {order_by}"
         )
     )?;
 

@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use crate::{database::{queries, tables::DB_FOLDERS_NAME}, errors::HvtError, folders::types::{ManagedFolder, RJCode}};
+use crate::{database::queries, errors::HvtError, folders::types::ManagedFolder};
 use std::fs;
 
 pub mod types;
@@ -44,24 +44,3 @@ pub fn register_folders(conn: &Connection, folder_list: Vec<ManagedFolder>) -> R
     Ok(())
 }
 
-pub fn get_list_of_unscanned_works(conn: &Connection, max_cnt: Option<usize>) -> Result<Vec<RJCode>, HvtError> {
-    let rjcodes = queries::get_unscanned_works(conn)?;
-
-    if let Some(x) = max_cnt {
-        let res = rjcodes.into_iter().take(x).collect();
-        Ok(res)
-    } else {
-        Ok(rjcodes)
-    }
-}
-
-pub fn get_list_of_all_works(conn: &Connection, max_cnt: Option<usize>) -> Result<Vec<RJCode>, HvtError> {
-    let rjcodes = queries::get_all_works(conn)?;
-
-    if let Some(x) = max_cnt {
-        let res = rjcodes.into_iter().take(x).collect();
-        Ok(res)
-    } else {
-        Ok(rjcodes)
-    }
-}

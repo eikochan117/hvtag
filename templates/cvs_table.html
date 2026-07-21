@@ -1,0 +1,29 @@
+<table>
+<thead><tr>
+  <th><a class="sort-link" hx-get="/cvs/table?sort=jp&dir={% if sort == "jp" && dir == "asc" %}desc{% else %}asc{% endif %}" hx-target="#cvs-table-container" hx-push-url="true">Voice actor (JP){% if sort == "jp" %} {% if dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}</a></th>
+  <th><a class="sort-link" hx-get="/cvs/table?sort=en&dir={% if sort == "en" && dir == "asc" %}desc{% else %}asc{% endif %}" hx-target="#cvs-table-container" hx-push-url="true">EN{% if sort == "en" %} {% if dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}</a></th>
+  <th><a class="sort-link" hx-get="/cvs/table?sort=custom&dir={% if sort == "custom" && dir == "asc" %}desc{% else %}asc{% endif %}" hx-target="#cvs-table-container" hx-push-url="true">Custom name{% if sort == "custom" %} {% if dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}</a></th>
+  <th><a class="sort-link" hx-get="/cvs/table?sort=works&dir={% if sort == "works" && dir == "asc" %}desc{% else %}asc{% endif %}" hx-target="#cvs-table-container" hx-push-url="true">Works{% if sort == "works" %} {% if dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}{% endif %}</a></th>
+  <th>Actions</th>
+</tr></thead>
+<tbody>
+{% for c in cvs %}
+<tr>
+  <td><a href="/works?cv={{ c.display_name()|urlencode }}">{{ c.name_jp }}</a></td>
+  <td>{% if let Some(en) = c.name_en %}{{ en }}{% else %}&mdash;{% endif %}</td>
+  <td>{% if let Some(cn) = c.custom_name %}{{ cn }}{% else %}&mdash;{% endif %}</td>
+  <td>{{ c.work_count }}</td>
+  <td>
+    <form class="inline" hx-post="/cvs/{{ c.cv_id }}/rename?sort={{ sort }}&dir={{ dir }}" hx-target="#cvs-table-container" hx-swap="innerHTML">
+      <input type="text" name="custom_cv_name" placeholder="rename to..." value="{% if let Some(cn) = c.custom_name %}{{ cn }}{% endif %}">
+      <button type="submit">Rename</button>
+    </form>
+    {% if c.custom_name.is_some() %}
+    <button hx-post="/cvs/{{ c.cv_id }}/reset?sort={{ sort }}&dir={{ dir }}" hx-target="#cvs-table-container" hx-swap="innerHTML">Reset name</button>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+<p>Total: {{ cvs.len() }} voice actors</p>

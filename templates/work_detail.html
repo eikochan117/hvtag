@@ -1,0 +1,56 @@
+{% extends "layout.html" %}
+{% block title %}{{ work.name }} — hvtag{% endblock %}
+{% block content %}
+<p><a href="/works">&larr; Back to works</a></p>
+<div class="detail-grid">
+  <div>
+    <img class="cover-detail" data-cover-src="/covers/{{ work.rjcode }}" alt="{{ work.name }}">
+  </div>
+  <div style="flex:1; min-width:280px;">
+    <h1>{{ work.name }}</h1>
+    <p>{{ work.rjcode }} &middot;
+      {% if let Some(rg) = work.circle_rgcode %}
+      <a href="/works?circle={{ rg|urlencode }}">{{ work.circle_name }}</a> ({{ rg }})
+      {% else %}
+      {{ work.circle_name }}
+      {% endif %}
+    </p>
+
+    <div>
+      {% for tag in work.tags %}<a class="chip" href="/works?tag={{ tag|urlencode }}">{{ tag }}</a>{% endfor %}
+    </div>
+
+    <dl class="detail-meta">
+      <dt>Voice actors</dt>
+      <dd>
+        {% if work.cvs.is_empty() %}&mdash;{% else %}
+        {% for cv in work.cvs %}{% if !loop.first %}, {% endif %}<a href="/works?cv={{ cv|urlencode }}">{{ cv }}</a>{% endfor %}
+        {% endif %}
+      </dd>
+
+      <dt>Rating</dt>
+      <dd>{% if let Some(r) = work.rating %}{{ r }}{% else %}&mdash;{% endif %}</dd>
+
+      <dt>Stars</dt>
+      <dd>{% if let Some(s) = work.stars %}&#9733; {{ s }}{% else %}&mdash;{% endif %}</dd>
+
+      <dt>Release date</dt>
+      <dd>{% if let Some(d) = work.release_date %}{{ d }}{% else %}&mdash;{% endif %}</dd>
+
+      <dt>Folder</dt>
+      <dd>{{ work.folder_path }}</dd>
+    </dl>
+
+    <p style="margin-top:1.5rem; display:flex; gap:0.6rem;">
+      <button class="danger" hx-post="/works/{{ work.rjcode }}/trash" hx-swap="none"
+              hx-confirm="Move this work's folder to a sibling .trash directory and remove it from the library listing? This is reversible (move the folder back and set active=1 in the database) but there's no restore button in the UI yet.">
+        Trash this work
+      </button>
+      <button class="danger" hx-post="/works/{{ work.rjcode }}/delete" hx-swap="none"
+              hx-confirm="Permanently delete {{ work.rjcode }} from the database? Use this only if the folder is already gone from disk. Unlike Trash, this does NOT touch any files and CANNOT be undone — every tag/circle/CV link, rating, and cover record for this work is erased.">
+        Delete from database
+      </button>
+    </p>
+  </div>
+</div>
+{% endblock %}

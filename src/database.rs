@@ -9,6 +9,8 @@ pub mod sql;
 pub mod tables;
 pub mod custom_tags;
 pub mod custom_circles;
+pub mod custom_cvs;
+pub mod web_queries;
 
 pub fn init(conn: &Connection) -> Result<(), HvtError> {
     // Ensure foreign keys are enabled (additional safety check)
@@ -40,6 +42,9 @@ pub fn init(conn: &Connection) -> Result<(), HvtError> {
 
     // Custom circle mappings table (global mapping)
     conn.execute(&init_table(DB_CUSTOM_CIRCLE_MAPPINGS_NAME, DB_CUSTOM_CIRCLE_MAPPINGS_COLS), [])?;
+
+    // Custom CV mappings table (global mapping)
+    conn.execute(&init_table(DB_CUSTOM_CV_MAPPINGS_NAME, DB_CUSTOM_CV_MAPPINGS_COLS), [])?;
 
     // Track parsing preferences table
     conn.execute(&init_table(DB_TRACK_PARSING_PREFS_NAME, DB_TRACK_PARSING_PREFS_COLS), [])?;

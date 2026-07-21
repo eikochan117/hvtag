@@ -1,0 +1,10 @@
+{% extends "layout.html" %}
+{% block title %}Circles — hvtag{% endblock %}
+{% block content %}
+<h1>Circles</h1>
+<p>Setting a preference applies globally to every work by this circle. Changes are queued —
+   run <code>hvtag --tag</code> afterwards to apply them to audio files.</p>
+<div id="circles-table-container">
+{{ table_html|safe }}
+</div>
+{% endblock %}

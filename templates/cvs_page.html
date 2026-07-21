@@ -1,0 +1,11 @@
+{% extends "layout.html" %}
+{% block title %}Voice Actors — hvtag{% endblock %}
+{% block content %}
+<h1>Voice Actors</h1>
+<p>Renaming a voice actor applies globally to every work featuring them — use this to merge
+   near-duplicate DLSite entries (spelling/parenthetical variants) into one name. Changes are
+   queued — run <code>hvtag --tag</code> afterwards to apply them to audio files.</p>
+<div id="cvs-table-container">
+{{ table_html|safe }}
+</div>
+{% endblock %}
