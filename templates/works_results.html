@@ -7,6 +7,7 @@
           hx-target="#work-results"
           hx-include="{{ common_include }}, #cur-view"
           hx-push-url="true">
+    <option value="date_added" {% if sort == "date_added" %}selected{% endif %}>Sort: Date Added</option>
     <option value="title" {% if sort == "title" %}selected{% endif %}>Sort: Title</option>
     <option value="circle" {% if sort == "circle" %}selected{% endif %}>Sort: Circle</option>
     <option value="rjcode" {% if sort == "rjcode" %}selected{% endif %}>Sort: RJ Code</option>
@@ -36,6 +37,7 @@
   <th><a class="sort-link" hx-get="/works/search" hx-vals='{"sort":"title"}' hx-include="{{ common_include }}, #cur-view" hx-target="#work-results" hx-push-url="true">Title{% if sort == "title" %} &#9660;{% endif %}</a></th>
   <th><a class="sort-link" hx-get="/works/search" hx-vals='{"sort":"circle"}' hx-include="{{ common_include }}, #cur-view" hx-target="#work-results" hx-push-url="true">Circle{% if sort == "circle" %} &#9660;{% endif %}</a></th>
   <th><a class="sort-link" hx-get="/works/search" hx-vals='{"sort":"rating"}' hx-include="{{ common_include }}, #cur-view" hx-target="#work-results" hx-push-url="true">Rating{% if sort == "rating" %} &#9660;{% endif %}</a></th>
+  <th><a class="sort-link" hx-get="/works/search" hx-vals='{"sort":"date_added"}' hx-include="{{ common_include }}, #cur-view" hx-target="#work-results" hx-push-url="true">Date Added{% if sort == "date_added" %} &#9660;{% endif %}</a></th>
 </tr></thead>
 <tbody>
 {% for w in works %}

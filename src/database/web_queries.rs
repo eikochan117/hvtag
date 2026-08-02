@@ -56,6 +56,7 @@ pub enum WorkSort {
     Circle,
     Rjcode,
     Rating,
+    DateAdded,
 }
 
 impl WorkSort {
@@ -64,7 +65,8 @@ impl WorkSort {
             Some("circle") => WorkSort::Circle,
             Some("rjcode") => WorkSort::Rjcode,
             Some("rating") => WorkSort::Rating,
-            _ => WorkSort::Title,
+            Some("title") => WorkSort::Title,
+            _ => WorkSort::DateAdded,
         }
     }
 
@@ -75,6 +77,7 @@ impl WorkSort {
             WorkSort::Circle => "circle",
             WorkSort::Rjcode => "rjcode",
             WorkSort::Rating => "rating",
+            WorkSort::DateAdded => "date_added",
         }
     }
 
@@ -84,6 +87,9 @@ impl WorkSort {
             WorkSort::Circle => "circle_name COLLATE NOCASE ASC, name COLLATE NOCASE ASC",
             WorkSort::Rjcode => "f.rjcode ASC",
             WorkSort::Rating => "s.stars IS NULL ASC, s.stars DESC, name COLLATE NOCASE ASC",
+            // `folders.last_scan` is set once, at row-insert time, and never updated again, so
+            // it doubles as the "date added to DB" timestamp despite its name.
+            WorkSort::DateAdded => "f.last_scan DESC, name COLLATE NOCASE ASC",
         }
     }
 }
