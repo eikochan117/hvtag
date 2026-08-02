@@ -53,9 +53,9 @@ pub async fn download_cover_to_cache(
     let img = image::load_from_memory(&bytes)
         .map_err(|e| HvtError::Image(format!("Failed to decode image: {}", e)))?;
 
-    // Optionally resize
+    // Optionally resize (crop-to-fill so non-square covers aren't stretched)
     let final_img = if let Some((width, height)) = target_size {
-        img.resize_exact(width, height, image::imageops::FilterType::Lanczos3)
+        img.resize_to_fill(width, height, image::imageops::FilterType::Lanczos3)
     } else {
         img
     };
@@ -142,9 +142,9 @@ pub async fn download_and_save_cover(
     let img = image::load_from_memory(&bytes)
         .map_err(|e| HvtError::Image(format!("Failed to decode image: {}", e)))?;
 
-    // Optionally resize
+    // Optionally resize (crop-to-fill so non-square covers aren't stretched)
     let final_img = if let Some((width, height)) = target_size {
-        img.resize_exact(width, height, image::imageops::FilterType::Lanczos3)
+        img.resize_to_fill(width, height, image::imageops::FilterType::Lanczos3)
     } else {
         img
     };
