@@ -9,6 +9,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use tracing::warn;
 
 use crate::config::Config;
+use crate::folders::types::RJCode;
 use crate::interaction::web_provider::{JobChannel, WebInteractionProvider, WebProgressSink};
 
 #[derive(Clone)]
@@ -93,6 +94,64 @@ impl JobManager {
 
                 // Free the slot so a new job can be started. Existing WS subscribers keep their
                 // own `Arc<JobChannel>` clone and can keep draining buffered events after this.
+                *manager.current.lock().await = None;
+            });
+        });
+
+        Ok(())
+    }
+
+    /// Starts a single-work refresh (`workflows::retag::run_retag_workflow`) as a background
+    /// task — the web UI's per-work "rescan" button. Same one-job-at-a-time constraint and
+    /// thread/runtime setup as `start_import` (see its doc comment for why); the two never run
+    /// concurrently since they share `self.current`.
+    pub async fn start_retag(
+        &self,
+        rjcode: RJCode,
+        app_config: Config,
+        db_path: String,
+    ) -> Result<(), &'static str> {
+        let mut guard = self.current.lock().await;
+        if guard.is_some() {
+            return Err("A job is already running");
+        }
+
+        let channel = JobChannel::new();
+        *guard = Some(channel.clone());
+        drop(guard);
+
+        let manager = self.clone();
+
+        std::thread::spawn(move || {
+            let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    channel.finish(false, format!("Failed to start job runtime: {}", e));
+                    return;
+                }
+            };
+
+            rt.block_on(async move {
+                let progress = WebProgressSink::new(channel.clone());
+                let interaction = WebInteractionProvider::new(channel.clone());
+
+                let result = match crate::database::db_loader::open_db(Some(&db_path)) {
+                    Ok(db) => {
+                        crate::workflows::retag::run_retag_workflow(&db, &rjcode, &app_config, &progress, &interaction)
+                            .await
+                    }
+                    Err(e) => Err(e),
+                };
+
+                let (ok, message) = match result {
+                    Ok(()) => (true, "Rescan finished".to_string()),
+                    Err(e) => {
+                        warn!("Rescan job failed: {}", e);
+                        (false, format!("Rescan failed: {}", e))
+                    }
+                };
+                channel.finish(ok, message);
+
                 *manager.current.lock().await = None;
             });
         });

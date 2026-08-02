@@ -69,27 +69,25 @@ fn extract_cv_from_staff_block(html: &str) -> Result<Vec<String>, HvtError> {
 }
 
 impl DlSiteProductScrapResult {
-    pub async fn build_from_rjcode(rjcode: String) -> DlSiteProductScrapResult {
+    pub async fn build_from_rjcode(rjcode: String) -> Result<DlSiteProductScrapResult, HvtError> {
         Self::build_from_rjcode_with_client(rjcode, None).await
     }
 
+    /// Propagates scrape failures (network/proxy errors, timeouts) as `Err` instead of masking
+    /// them as an empty result. An empty `genre` list is only meaningful as "work removed" when
+    /// the page was actually fetched and parsed successfully — collapsing a transient fetch
+    /// failure into the same empty shape made it indistinguishable from a real removal, and the
+    /// caller would then mark the work as permanently gone (see `dlsite.rs`'s `RemovedWork`
+    /// check) with no way to retry.
     pub async fn build_from_rjcode_with_client(
         rjcode: String,
         client: Option<&reqwest::Client>,
-    ) -> DlSiteProductScrapResult {
-        // Internal function that handles errors - converts them to default values
+    ) -> Result<DlSiteProductScrapResult, HvtError> {
         match Self::build_from_rjcode_impl(rjcode, client).await {
-            Ok(result) => result,
+            Ok(result) => Ok(result),
             Err(e) => {
                 warn!("Failed to scrape DLSite data: {}", e);
-                // Return empty result on error (will be detected as RemovedWork)
-                DlSiteProductScrapResult {
-                    genre: vec![],
-                    cvs: vec![String::from("<unknown>")],
-                    circle_name: None,
-                    circle_name_en: None,
-                    circle_name_jp: None,
-                }
+                Err(e)
             }
         }
     }

@@ -185,7 +185,7 @@ async fn refresh_metadata_and_cache_cover(
     assign_data_to_work_with_client(db, rjcode.clone(), data_selection, Some(http_client)).await?;
 
     if let Ok(Some(cover_url)) = queries::get_cover_link(db, rjcode) {
-        if let Err(e) = cover_art::download_cover_to_cache(&cover_url, &rjcode.to_string(), Some((500, 500))).await {
+        if let Err(e) = cover_art::download_cover_to_cache(&cover_url, &rjcode.to_string(), Some((500, 500)), Some(http_client)).await {
             warn!("Failed to cache fresh cover for {}: {}", rjcode, e);
         }
     }
@@ -226,18 +226,15 @@ async fn apply_cover_and_tag(
     Ok(())
 }
 
-/// `--retag <rjcode>`: refresh a single work already registered in the library.
+/// `--retag <rjcode>`: refresh a single work already registered in the library. Thin CLI wrapper
+/// around the shared `workflows::retag::run_retag_workflow` (also used by the web UI's
+/// per-work "rescan" button).
 async fn run_retag_workflow(
     db: &rusqlite::Connection,
     rjcode: &str,
     app_config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let rjcode = RJCode::new(rjcode.to_string())?;
-    let folder_path = queries::get_work_path(db, app_config, &rjcode)?
-        .ok_or_else(|| format!(
-            "{} not found in the database. Use --tag on its folder in the import directory instead.",
-            rjcode
-        ))?;
 
     if !converter::is_ffmpeg_available() {
         return Err("ffmpeg not found in PATH (required for automatic FLAC/WAV/OGG conversion).".into());
@@ -245,15 +242,9 @@ async fn run_retag_workflow(
 
     info!("=== RETAG {} ===", rjcode);
 
-    let vpn_manager = connect_vpn_if_enabled(app_config)?;
-    let http_client = vpn::build_dlsite_client(app_config)?;
-
-    let metadata_result = refresh_metadata_and_cache_cover(db, &rjcode, &http_client).await;
-
-    disconnect_vpn(vpn_manager)?;
-    metadata_result?;
-
-    apply_cover_and_tag(db, &rjcode, folder_path, app_config, true).await?;
+    let progress = interaction::cli::CliProgressSink::new();
+    let interaction_provider = interaction::cli::CliInteractionProvider::new();
+    workflows::retag::run_retag_workflow(db, &rjcode, app_config, &progress, &interaction_provider).await?;
 
     info!("=== RETAG COMPLETE: {} ===", rjcode);
     Ok(())
