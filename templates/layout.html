@@ -139,11 +139,55 @@
     display: block;
   }
   .works-table td, .works-table th { white-space: nowrap; }
+  .import-controls { display: flex; align-items: center; gap: 0.75rem; margin: 1rem 0; }
+  .question-panel {
+    margin: 1rem 0;
+    padding: 1rem;
+    background: #1c1f26;
+    border: 1px solid #3d4656;
+    border-radius: 8px;
+  }
+  .question-panel h3 { margin-top: 0; }
+  .question-panel input[type=text], .question-panel input[type=number] {
+    width: auto;
+    display: inline-block;
+    margin-right: 0.5rem;
+  }
+  button.question-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    margin: 0.25rem 0;
+  }
+  .question-panel .warning { color: #e0a030; }
+  .progress-wrap { margin: 1rem 0; }
+  .progress-track {
+    background: #1c1f26;
+    border: 1px solid #333844;
+    border-radius: 6px;
+    height: 10px;
+    overflow: hidden;
+  }
+  .progress-fill { background: #4a7dfc; height: 100%; width: 0%; transition: width 0.15s ease; }
+  .progress-label { font-size: 0.85rem; color: #9aa3b2; margin-top: 0.3rem; }
+  .import-console {
+    background: #101216;
+    border: 1px solid #262a32;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    max-height: 480px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
 </style>
 </head>
 <body>
 <nav>
   <a href="/works">Works</a>
+  <a href="/import">Import</a>
   <a href="/tags">Tags</a>
   <a href="/circles">Circles</a>
   <a href="/cvs">Voice Actors</a>

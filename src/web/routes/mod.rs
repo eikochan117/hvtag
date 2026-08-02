@@ -1,5 +1,6 @@
 pub mod circles;
 pub mod cvs;
+pub mod import;
 pub mod stats;
 pub mod static_assets;
 pub mod tags;
@@ -35,5 +36,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/circles/{cir_id}/reset", post(circles::reset_preference))
         .route("/covers/{rjcode}", get(static_assets::cover_image))
         .route("/static/htmx.min.js", get(static_assets::htmx_js))
+        .route("/import", get(import::import_page))
+        .route("/import/status", get(import::import_status))
+        .route("/import/start", post(import::start_import))
+        .route("/import/ws", get(import::import_ws))
         .with_state(state)
 }

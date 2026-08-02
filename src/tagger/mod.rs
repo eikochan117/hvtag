@@ -11,6 +11,7 @@ use rusqlite::Connection;
 use tracing::{info, warn, debug};
 use crate::errors::HvtError;
 use crate::folders::types::{ManagedFolder, RJCode};
+use crate::interaction::InteractionProvider;
 use crate::tagger::types::{AudioMetadata, TaggerConfig, AudioFormat};
 
 /// Main function to process a work folder:
@@ -23,6 +24,7 @@ pub async fn process_work_folder(
     conn: &Connection,
     folder: &ManagedFolder,
     config: &TaggerConfig,
+    interaction: &dyn InteractionProvider,
 ) -> Result<(), HvtError> {
     info!("Processing folder: {}", folder.path);
 
@@ -82,7 +84,7 @@ pub async fn process_work_folder(
     }
 
     // Tag all audio files
-    tag_all_files(conn, fld_id, folder, &metadata, config).await?;
+    tag_all_files(conn, fld_id, folder, &metadata, config, interaction).await?;
 
     // Mark folder as tagged by creating .tagged file (skipped for one-shot test runs)
     if config.write_tagged_marker {
@@ -183,6 +185,7 @@ async fn tag_all_files(
     folder: &ManagedFolder,
     base_metadata: &AudioMetadata,
     config: &TaggerConfig,
+    interaction: &dyn InteractionProvider,
 ) -> Result<(), HvtError> {
     use std::path::PathBuf;
 
@@ -259,30 +262,13 @@ async fn tag_all_files(
         return Ok(());
     }
 
-    // STEP 2: Check if files already have track numbers in their ID3 tags
-    let existing_tracks: Vec<Option<u32>> = audio_files.iter()
-        .map(|(file_path, _)| {
-            id3_handler::read_id3_tags(file_path, &config.tag_separator)
-                .ok()
-                .flatten()
-                .and_then(|m| m.track_number)
-        })
-        .collect();
-    let existing_track_count = existing_tracks.iter().filter(|t| t.is_some()).count();
-
-    // If most files already have track numbers, skip interactive parsing
-    let existing_track_rate = existing_track_count as f32 / audio_files.len() as f32;
-    let files_already_numbered = existing_track_rate > 0.7; // 70% threshold
-
-    if files_already_numbered {
-        debug!("Files already have track numbers ({}/{}), skipping track parsing prompt",
-               existing_track_count, audio_files.len());
-    }
-
     // STEP 3: Try to get saved parsing preference
     let parsing_pref = crate::database::queries::get_track_parsing_preference(conn, &folder.rjcode)?;
 
-    // STEP 4: Test if we can parse track numbers from filenames
+    // STEP 4: Test if we can parse track numbers from filenames.
+    // Existing ID3 tags (including track numbers) are never trusted — hvtag's job is to
+    // normalize files to the user's own tagging conventions, so every file is always
+    // re-derived from its filename regardless of what it already carries.
     let filenames: Vec<String> = audio_files.iter()
         .map(|(_, name)| name.clone())
         .collect();
@@ -291,11 +277,8 @@ async fn tag_all_files(
     // Per-file track numbers from manual input (Session-only, not saved to DB).
     let mut manual_numbers: Option<Vec<Option<u32>>> = None;
 
-    // Numbers that automatic detection would actually assign this run: only for files that
-    // don't already carry a track number (those are left untouched, see STEP 5).
-    let auto_parsed: Vec<Option<u32>> = filenames.iter().zip(existing_tracks.iter())
-        .filter(|(_, existing)| existing.is_none())
-        .map(|(f, _)| track_parser::parse_track_number_with_preference(f, current_pref.as_ref()))
+    let auto_parsed: Vec<Option<u32>> = filenames.iter()
+        .map(|f| track_parser::parse_track_number_with_preference(f, current_pref.as_ref()))
         .collect();
 
     let failure_count = auto_parsed.iter().filter(|p| p.is_none()).count();
@@ -303,13 +286,13 @@ async fn tag_all_files(
     let duplicate_numbers = track_parser::find_duplicate_track_numbers(&auto_parsed);
 
     // Trigger interactive session when:
-    // - files don't already have numbers, no saved preference exists yet, and automatic
-    //   parsing fails on more than 30% of files, OR
+    // - no saved preference exists yet, and automatic parsing fails on more than 30% of
+    //   files, OR
     // - automatic detection (whether via a saved preference or the fallback chain) would
     //   assign the same track number to two or more files. A stale/wrong saved preference
     //   can still collide on a folder with a different file layout, so this check applies
     //   even when a preference is already saved.
-    let low_confidence = !files_already_numbered && current_pref.is_none() && failure_rate > 0.3;
+    let low_confidence = current_pref.is_none() && failure_rate > 0.3;
     let has_duplicates = !duplicate_numbers.is_empty();
 
     if low_confidence || has_duplicates {
@@ -321,7 +304,7 @@ async fn tag_all_files(
                   failure_count, filenames.len());
         }
 
-        match interactive_parser::run_interactive_parsing(&filenames, folder.rjcode.as_str()) {
+        match interactive_parser::run_interactive_parsing(interaction, &filenames, folder.rjcode.as_str()).await {
             Ok(interactive_parser::ParsingResult::Strategy(pref)) => {
                 crate::database::queries::save_track_parsing_preference(conn, &folder.rjcode, &pref)?;
                 info!("Track parsing preference saved for future use");
@@ -342,18 +325,9 @@ async fn tag_all_files(
 
     // STEP 5: Tag each file
     for (file_index, (file_path, filename)) in audio_files.iter().enumerate() {
-        let existing_track = if let Ok(Some(existing_metadata)) = id3_handler::read_id3_tags(file_path, &config.tag_separator) {
-            existing_metadata.track_number
-        } else {
-            None
-        };
-
         let track_number = if let Some(ref nums) = manual_numbers {
             // Manual numbers override everything — the user chose each one explicitly
             nums.get(file_index).copied().flatten()
-        } else if let Some(existing) = existing_track {
-            debug!("File {} already has track number: {}, keeping it", filename, existing);
-            Some(existing)
         } else {
             track_parser::parse_track_number_with_preference(filename, current_pref.as_ref())
         };

@@ -1,4 +1,5 @@
 pub mod error;
+pub mod jobs;
 pub mod routes;
 pub mod state;
 
@@ -22,9 +23,16 @@ pub async fn run_ui_workflow(
     config: &Config,
     bind_override: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // `db` was opened by the caller via `db_loader::open_db(None)`, i.e. the default path — the
+    // import job needs that same path to open its own connection (see `jobs::JobManager`).
+    let db_path = crate::database::db_loader::get_default_db_path()?;
+
     let state = AppState {
         db: Arc::new(Mutex::new(db)),
+        db_path,
         page_size: config.ui.page_size,
+        config: config.clone(),
+        jobs: jobs::JobManager::new(),
     };
     let app = routes::build_router(state);
 

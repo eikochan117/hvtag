@@ -1,0 +1,225 @@
+{% extends "layout.html" %}
+{% block title %}Import — hvtag{% endblock %}
+{% block content %}
+<h1>Import</h1>
+<p>Source: <code>{{ source_path }}</code> &middot; Library: <code>{{ library_path }}</code></p>
+
+<div class="import-controls">
+  <button id="start-btn">Lancer l'import (--full)</button>
+  <span id="status-badge" class="chip">Inactif</span>
+</div>
+
+<div id="question-panel" class="question-panel" style="display:none;"></div>
+
+<div id="step-progress" class="progress-wrap" style="display:none;">
+  <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+  <div id="progress-label" class="progress-label"></div>
+</div>
+
+<pre id="console" class="import-console"></pre>
+
+<script>
+(function() {
+  var startBtn = document.getElementById('start-btn');
+  var statusBadge = document.getElementById('status-badge');
+  var consoleEl = document.getElementById('console');
+  var questionPanel = document.getElementById('question-panel');
+  var stepProgress = document.getElementById('step-progress');
+  var progressFill = document.getElementById('progress-fill');
+  var progressLabel = document.getElementById('progress-label');
+
+  var ws = null;
+  var stepTotal = 0;
+  var stepDone = 0;
+
+  function log(line) {
+    consoleEl.textContent += line + "\n";
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+
+  function setStatus(text) {
+    statusBadge.textContent = text;
+  }
+
+  function resetStep() {
+    stepTotal = 0;
+    stepDone = 0;
+    stepProgress.style.display = 'none';
+    progressFill.style.width = '0%';
+  }
+
+  function el(tag, attrs) {
+    var node = document.createElement(tag);
+    attrs = attrs || {};
+    Object.keys(attrs).forEach(function(k) {
+      if (k === 'text') node.textContent = attrs[k];
+      else node.setAttribute(k, attrs[k]);
+    });
+    return node;
+  }
+
+  function connectWs() {
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(proto + '//' + location.host + '/import/ws');
+
+    ws.onclose = function() {
+      if (statusBadge.textContent !== 'Terminé' && statusBadge.textContent !== 'Échec') {
+        setStatus('Inactif');
+      }
+      startBtn.disabled = false;
+    };
+    ws.onerror = function() {
+      log('[erreur websocket]');
+    };
+    ws.onmessage = function(evt) {
+      var data;
+      try { data = JSON.parse(evt.data); } catch (e) { return; }
+      handleEvent(data);
+    };
+  }
+
+  function handleEvent(ev) {
+    switch (ev.kind) {
+      case 'phase':
+        setStatus(ev.name);
+        log('\n--- ' + ev.name + ' ---');
+        resetStep();
+        break;
+      case 'step_start':
+        stepTotal = ev.total;
+        stepDone = 0;
+        stepProgress.style.display = stepTotal > 0 ? 'block' : 'none';
+        progressLabel.textContent = '0 / ' + stepTotal;
+        progressFill.style.width = '0%';
+        break;
+      case 'item':
+        stepDone += 1;
+        log(ev.message);
+        if (stepTotal > 0) {
+          progressLabel.textContent = stepDone + ' / ' + stepTotal;
+          progressFill.style.width = Math.min(100, (stepDone / stepTotal) * 100) + '%';
+        }
+        break;
+      case 'step_finish':
+        stepProgress.style.display = 'none';
+        break;
+      case 'log':
+        log(ev.message);
+        break;
+      case 'question':
+        setStatus('En attente de réponse');
+        renderQuestion(ev.id, ev.question);
+        break;
+      case 'finished':
+        setStatus(ev.ok ? 'Terminé' : 'Échec');
+        log('\n=== ' + ev.message + ' ===');
+        startBtn.disabled = false;
+        questionPanel.style.display = 'none';
+        questionPanel.innerHTML = '';
+        stepProgress.style.display = 'none';
+        break;
+    }
+  }
+
+  function answer(id, payload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ id: id, answer: payload }));
+    }
+    questionPanel.style.display = 'none';
+    questionPanel.innerHTML = '';
+  }
+
+  function renderQuestion(id, q) {
+    questionPanel.innerHTML = '';
+    questionPanel.style.display = 'block';
+
+    if (q.kind === 'track_strategy_menu') {
+      questionPanel.appendChild(el('h3', { text: 'Numérotation des pistes — ' + q.rjcode }));
+      var shown = q.filenames.slice(0, 10).join(', ');
+      if (q.filenames.length > 10) shown += ' … (+' + (q.filenames.length - 10) + ')';
+      questionPanel.appendChild(el('p', { text: shown }));
+      q.options.forEach(function(label, idx) {
+        var btn = el('button', { text: label, class: 'question-option' });
+        btn.onclick = function() { answer(id, { kind: 'index', index: idx }); };
+        questionPanel.appendChild(btn);
+      });
+    } else if (q.kind === 'delimiter' || q.kind === 'regex_pattern') {
+      var title = q.kind === 'delimiter'
+        ? 'Délimiteur avant le numéro de piste'
+        : 'Motif regex à retirer du nom de fichier';
+      questionPanel.appendChild(el('h3', { text: title }));
+      var input = el('input', { type: 'text' });
+      questionPanel.appendChild(input);
+      var submit = el('button', { text: 'Valider' });
+      submit.onclick = function() { answer(id, { kind: 'text', value: input.value }); };
+      questionPanel.appendChild(submit);
+      input.focus();
+    } else if (q.kind === 'strategy_preview') {
+      questionPanel.appendChild(el('h3', { text: 'Aperçu du résultat' }));
+      var table = document.createElement('table');
+      var tbody = document.createElement('tbody');
+      q.preview.slice(0, 20).forEach(function(row) {
+        var tr = document.createElement('tr');
+        tr.appendChild(el('td', { text: row.track_number !== null && row.track_number !== undefined ? row.track_number : '??' }));
+        tr.appendChild(el('td', { text: row.filename }));
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      questionPanel.appendChild(table);
+      if (q.preview.length > 20) {
+        questionPanel.appendChild(el('p', { text: '… et ' + (q.preview.length - 20) + ' de plus' }));
+      }
+      if (q.duplicates && q.duplicates.length > 0) {
+        questionPanel.appendChild(el('p', { text: 'Doublons: ' + q.duplicates.join(', '), class: 'warning' }));
+      }
+      var yes = el('button', { text: 'Utiliser cette stratégie' });
+      yes.onclick = function() { answer(id, { kind: 'confirm', value: true }); };
+      var no = el('button', { text: 'Choisir une autre stratégie' });
+      no.onclick = function() { answer(id, { kind: 'confirm', value: false }); };
+      questionPanel.appendChild(yes);
+      questionPanel.appendChild(no);
+    } else if (q.kind === 'manual_track_number') {
+      questionPanel.appendChild(el('h3', { text: 'Numéro de piste pour : ' + q.filename }));
+      var numInput = el('input', { type: 'number', min: '1', max: '999' });
+      questionPanel.appendChild(numInput);
+      var numSubmit = el('button', { text: 'Valider' });
+      numSubmit.onclick = function() {
+        var v = numInput.value.trim();
+        answer(id, { kind: 'optional_number', value: v === '' ? null : parseInt(v, 10) });
+      };
+      questionPanel.appendChild(numSubmit);
+      numInput.focus();
+    }
+  }
+
+  startBtn.addEventListener('click', function() {
+    startBtn.disabled = true;
+    consoleEl.textContent = '';
+    setStatus('Démarrage…');
+    fetch('/import/start', { method: 'POST' }).then(function(resp) {
+      if (resp.status === 202) {
+        connectWs();
+      } else {
+        resp.text().then(function(text) {
+          setStatus('Erreur');
+          log('[' + resp.status + '] ' + text);
+          startBtn.disabled = false;
+        });
+      }
+    }).catch(function() {
+      setStatus('Erreur réseau');
+      startBtn.disabled = false;
+    });
+  });
+
+  // Reattach if a job is already running (e.g. this page was reloaded mid-import).
+  fetch('/import/status').then(function(r) { return r.json(); }).then(function(data) {
+    if (data.running) {
+      startBtn.disabled = true;
+      setStatus('En cours');
+      connectWs();
+    }
+  }).catch(function() {});
+})();
+</script>
+{% endblock %}

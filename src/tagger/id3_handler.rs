@@ -11,6 +11,10 @@ pub fn write_id3_tags(file_path: &Path, metadata: &AudioMetadata, separator: &st
         Err(_) => id3::Tag::new(),
     };
 
+    // Strip any embedded cover art — hvtag keeps the cover as a separate folder.jpeg,
+    // and embedded pictures from source files would otherwise survive re-tagging.
+    tag.remove_all_pictures();
+
     // Set basic metadata
     tag.set_title(&metadata.title);
     tag.set_album(&metadata.album);
@@ -46,42 +50,4 @@ pub fn write_id3_tags(file_path: &Path, metadata: &AudioMetadata, separator: &st
         .map_err(|e| HvtError::AudioTag(format!("Failed to write ID3 tags: {}", e)))?;
 
     Ok(())
-}
-
-/// Reads ID3v2 tags from an MP3 file
-pub fn read_id3_tags(file_path: &Path, separator: &str) -> Result<Option<AudioMetadata>, HvtError> {
-    let tag = match id3::Tag::read_from_path(file_path) {
-        Ok(t) => t,
-        Err(_) => return Ok(None),
-    };
-
-    // Get genre - id3 crate's genres() returns Option<Vec<&str>>
-    let genres: Vec<String> = tag.genres()
-        .unwrap_or_default()
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-
-    // Parse artists using the same separator used to write them (write_id3_tags joins
-    // with the configured tag_separator, which may be "; ", "\0", or something else —
-    // this used to be hardcoded to ';', which silently misparsed multi-artist tags
-    // whenever a non-default separator was configured).
-    let artists_str = tag.artist().unwrap_or("");
-    let artists: Vec<String> = if !artists_str.is_empty() {
-        artists_str.split(separator).map(|s| s.trim().to_string()).collect()
-    } else {
-        Vec::new()
-    };
-
-    let metadata = AudioMetadata {
-        title: tag.title().unwrap_or("").to_string(),
-        artists,
-        album: tag.album().unwrap_or("").to_string(),
-        album_artist: tag.album_artist().unwrap_or("").to_string(),
-        track_number: tag.track(),
-        genre: genres,
-        date: tag.date_released().map(|d| d.to_string()),
-    };
-
-    Ok(Some(metadata))
 }

@@ -218,7 +218,7 @@ pub async fn trash_work(State(state): State<AppState>, Path(rjcode): Path<String
     }
 
     std::fs::create_dir_all(&trash_dir)?;
-    crate::move_folder_cross_drive(&source, &target)?;
+    crate::workflows::import::move_folder_cross_drive(&source, &target)?;
 
     {
         let conn = state.db.lock().expect("db mutex poisoned");

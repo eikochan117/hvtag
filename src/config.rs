@@ -11,6 +11,12 @@ pub enum VpnProvider {
     Wireguard,
     ProtonVPN,
     OpenVPN,
+    /// DLSite calls go through an HTTP/SOCKS5 proxy instead of a locally-managed tunnel —
+    /// there's no interface for hvtag to connect/disconnect itself. Intended for a deployment
+    /// where a sidecar container (e.g. gluetun) already holds its own VPN tunnel up and exposes
+    /// a proxy that only DLSite traffic is routed through; everything else (the web UI, remote
+    /// folder pulls) never touches it.
+    Proxy,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -23,6 +29,16 @@ pub struct WireGuardConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProxyConfig {
+    /// e.g. "http://gluetun:8888" or "socks5://gluetun:1080"
+    pub url: String,
+
+    /// Optional proxy basic-auth credentials, if the proxy requires them.
+    pub username: Option<String>,
+    pub password: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VpnConfig {
     /// Enable VPN functionality
     pub enabled: bool,
@@ -32,6 +48,9 @@ pub struct VpnConfig {
 
     /// WireGuard-specific configuration
     pub wireguard: Option<WireGuardConfig>,
+
+    /// Proxy configuration, used when `provider = "proxy"`
+    pub proxy: Option<ProxyConfig>,
 }
 
 impl Default for VpnConfig {
@@ -40,6 +59,7 @@ impl Default for VpnConfig {
             enabled: false,
             provider: VpnProvider::Wireguard,
             wireguard: None,
+            proxy: None,
         }
     }
 }
@@ -94,6 +114,44 @@ pub struct ImportConfig {
 
     /// Target library directory where works are moved after processing
     pub library_path: Option<String>,
+
+    /// Remote machines whose drop folders get rsync'd into `source_path` before each `--full`
+    /// import — for the "several machines on the network deposit works, the server pulls them"
+    /// deployment. Empty by default: nothing changes for anyone not using this.
+    #[serde(default)]
+    pub remote_sources: Vec<RemoteSource>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct RemoteSource {
+    /// Label used in progress/log output — purely cosmetic.
+    pub name: String,
+
+    pub host: String,
+
+    #[serde(default = "default_ssh_port")]
+    pub port: u16,
+
+    pub user: String,
+
+    /// Private key path for `ssh -i`. If omitted, ssh falls back to its own defaults
+    /// (`~/.ssh/id_*`, ssh-agent, etc.) exactly as a plain `ssh` invocation would.
+    pub ssh_key_path: Option<String>,
+
+    /// Directory on the remote host whose *contents* (RJ/VJ folders) get pulled — not the
+    /// directory itself.
+    pub remote_path: String,
+
+    /// After a successful pull, delete the source files on the remote host too (adds rsync's
+    /// `--remove-source-files`). Off by default: a failed run leaves the remote copy intact to
+    /// retry, and nothing gets deleted on a machine you don't have hvtag's eyes on without you
+    /// opting in explicitly.
+    #[serde(default)]
+    pub remove_after_pull: bool,
+}
+
+fn default_ssh_port() -> u16 {
+    22
 }
 
 // ========== Web UI Configuration ==========
@@ -222,6 +280,18 @@ impl Config {
 # Library directory: where works are moved after processing
 # library_path = "{library_example}"
 
+# Optional: machines on your network that deposit works into their own local drop folder,
+# which `--full` pulls into source_path (via rsync over ssh) before scanning it. Repeat this
+# block per machine. Requires the `rsync` and `ssh` binaries to be available.
+# [[import.remote_sources]]
+# name = "desktop-pc"
+# host = "192.168.1.50"
+# port = 22
+# user = "eiko"
+# ssh_key_path = "/home/eiko/.ssh/id_ed25519"  # optional; omit to use ssh's own defaults
+# remote_path = "/home/eiko/hvtag-drop"
+# remove_after_pull = false
+
 [vpn]
 # Enable VPN functionality for metadata fetching from DLsite
 # Set to true if you need to access DLsite from a restricted region
@@ -235,6 +305,15 @@ config_path = "{wg_example}"
 
 # Optional: custom interface name (defaults to config filename without extension)
 # interface_name = "wg-hvtag"
+
+# Alternative to [vpn.wireguard]: route DLSite calls through an HTTP/SOCKS5 proxy instead of a
+# tunnel hvtag manages itself — for example a sidecar container (gluetun) that already has its
+# own VPN connection up. Set provider = "proxy" above and uncomment below. Nothing else (the web
+# UI, remote folder pulls) is routed through this proxy — only DLSite metadata/cover requests.
+# [vpn.proxy]
+# url = "http://gluetun:8888"
+# username = "proxy-user"
+# password = "proxy-pass"
 
 [tagger]
 # Use null byte separator (\0) for tags instead of custom separator

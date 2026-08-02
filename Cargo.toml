@@ -25,12 +25,14 @@ metaflac = "0.2"
 image = "0.25"
 regex = "1.0"
 dialoguer = "0.11"
+async-trait = "0.1"
 unicode-normalization = "0.1"
 indicatif = "0.17"
 dirs = "5.0"
 
 # Web UI (--ui)
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
+futures-util = "0.3"
 askama = "0.12"
 
 [build]
