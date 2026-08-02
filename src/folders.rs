@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use crate::{database::queries, errors::HvtError, folders::types::ManagedFolder};
+use crate::{config::Config, database::queries, errors::HvtError, folders::types::ManagedFolder};
 use std::fs;
 
 pub mod types;
@@ -35,10 +35,14 @@ pub fn get_list_of_folders(base_path: &str) -> Result<Vec<ManagedFolder>, HvtErr
     Ok(res)
 }
 
-/// Enregistre les dossiers dans la db
-pub fn register_folders(conn: &Connection, folder_list: Vec<ManagedFolder>) -> Result<(), HvtError> {
+/// Enregistre les dossiers dans la db. Paths are stored in portable `$library`/`$source` form
+/// (see `crate::paths`) so the database survives moving to a deployment where those directories
+/// are mounted somewhere else.
+pub fn register_folders(conn: &Connection, config: &Config, folder_list: Vec<ManagedFolder>) -> Result<(), HvtError> {
     for fld in &folder_list {
-        queries::insert_managed_folder(conn, fld)?;
+        let mut stored = fld.clone();
+        stored.path = crate::paths::to_stored_path(config, &fld.path);
+        queries::insert_managed_folder(conn, &stored)?;
     }
 
     Ok(())

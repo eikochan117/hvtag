@@ -173,7 +173,7 @@ pub async fn work_detail_page(
 
     let detail = {
         let conn = state.db.lock().expect("db mutex poisoned");
-        web_queries::get_work_detail(&conn, &rjcode)?
+        web_queries::get_work_detail(&conn, &state.config, &rjcode)?
     };
 
     let Some(work) = detail else {
@@ -200,7 +200,7 @@ pub async fn trash_work(State(state): State<AppState>, Path(rjcode): Path<String
 
     let folder_path = {
         let conn = state.db.lock().expect("db mutex poisoned");
-        web_queries::get_folder_path(&conn, rjcode.as_str())?
+        web_queries::get_folder_path(&conn, &state.config, rjcode.as_str())?
     };
     let Some(folder_path) = folder_path.filter(|p| !p.is_empty()) else {
         return Ok((StatusCode::NOT_FOUND, "Work not found or has no folder path").into_response());
@@ -222,7 +222,7 @@ pub async fn trash_work(State(state): State<AppState>, Path(rjcode): Path<String
 
     {
         let conn = state.db.lock().expect("db mutex poisoned");
-        web_queries::deactivate_and_relocate_work(&conn, &rjcode, &target.to_string_lossy())?;
+        web_queries::deactivate_and_relocate_work(&conn, &state.config, &rjcode, &target.to_string_lossy())?;
     }
 
     Ok((StatusCode::OK, [("HX-Redirect", "/works")]).into_response())

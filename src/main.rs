@@ -25,6 +25,7 @@ mod config;
 mod web;
 mod interaction;
 mod workflows;
+mod paths;
 
 #[derive(Parser, Debug)]
 struct PrgmArgs {
@@ -232,7 +233,7 @@ async fn run_retag_workflow(
     app_config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let rjcode = RJCode::new(rjcode.to_string())?;
-    let folder_path = queries::get_work_path(db, &rjcode)?
+    let folder_path = queries::get_work_path(db, app_config, &rjcode)?
         .ok_or_else(|| format!(
             "{} not found in the database. Use --tag on its folder in the import directory instead.",
             rjcode
@@ -271,7 +272,7 @@ async fn run_full_retag_workflow(
         return Err("ffmpeg not found in PATH (required for automatic FLAC/WAV/OGG conversion).".into());
     }
 
-    let works = queries::get_all_works_with_paths(db)?;
+    let works = queries::get_all_works_with_paths(db, app_config)?;
     if works.is_empty() {
         info!("No works in database");
         return Ok(());
@@ -385,7 +386,7 @@ async fn run_tag_test_workflow(
 
     info!("=== TAG TEST (one-shot, no DB/move): {} ===", folder.rjcode);
 
-    register_folders(db, vec![folder.clone()])?;
+    register_folders(db, app_config, vec![folder.clone()])?;
 
     let result = run_tag_test_inner(db, &folder, app_config).await;
 

@@ -1,7 +1,9 @@
 use rusqlite::{Connection, params};
+use crate::config::Config;
 use crate::folders::types::{ManagedFolder, RGCode, RJCode};
 use crate::database::tables::*;
 use crate::errors::HvtError;
+use crate::paths::resolve_stored_path;
 use crate::tagger::track_parser::TrackParsingPreference;
 
 /// Insert a managed folder into the database
@@ -332,19 +334,25 @@ pub fn get_max_id(
 }
 
 /// Get all active works with their registered paths — used by `--full-retag` to enumerate
-/// every work in the library.
-pub fn get_all_works_with_paths(conn: &Connection) -> Result<Vec<(RJCode, String)>, HvtError> {
+/// every work in the library. Paths are resolved from their stored `$library`/`$source` form
+/// (see `crate::paths`) using `config`.
+pub fn get_all_works_with_paths(conn: &Connection, config: &Config) -> Result<Vec<(RJCode, String)>, HvtError> {
     let mut stmt = conn.prepare(&format!(
         "SELECT rjcode, path FROM {DB_FOLDERS_NAME} WHERE active = 1"
     ))?;
-    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
-    let works: Vec<(RJCode, String)> = rows.collect::<Result<Vec<_>, _>>()?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get::<_, String>(1)?)))?;
+    let works: Vec<(RJCode, String)> = rows
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|(rjcode, path)| (rjcode, resolve_stored_path(config, &path)))
+        .collect();
     Ok(works)
 }
 
 /// Get the registered folder path for a specific work, if it exists in the database.
 /// Used by `--retag <rjcode>` to resolve the real library path rather than assuming cwd.
-pub fn get_work_path(conn: &Connection, rjcode: &RJCode) -> Result<Option<String>, HvtError> {
+/// Resolved from its stored `$library`/`$source` form (see `crate::paths`) using `config`.
+pub fn get_work_path(conn: &Connection, config: &Config, rjcode: &RJCode) -> Result<Option<String>, HvtError> {
     let path: Option<String> = conn
         .query_row(
             &format!("SELECT path FROM {DB_FOLDERS_NAME} WHERE rjcode = ?1"),
@@ -352,7 +360,7 @@ pub fn get_work_path(conn: &Connection, rjcode: &RJCode) -> Result<Option<String
             |row| row.get(0),
         )
         .ok();
-    Ok(path)
+    Ok(path.map(|p| resolve_stored_path(config, &p)))
 }
 
 /// Check if a work is already registered in the database — used by `--tag <folder>` to refuse
@@ -389,16 +397,21 @@ pub fn delete_work_permanently(conn: &Connection, rjcode: &RJCode) -> Result<(),
     Ok(())
 }
 
-/// Get all unscanned works with their paths from the database
-pub fn get_unscanned_works_with_paths(conn: &Connection) -> Result<Vec<(RJCode, String)>, HvtError> {
+/// Get all unscanned works with their paths from the database. Resolved from their stored
+/// `$library`/`$source` form (see `crate::paths`) using `config`.
+pub fn get_unscanned_works_with_paths(conn: &Connection, config: &Config) -> Result<Vec<(RJCode, String)>, HvtError> {
     let mut stmt = conn.prepare(&format!(
         "SELECT rjcode, path FROM {DB_FOLDERS_NAME}
          WHERE fld_id NOT IN (SELECT fld_id FROM {DB_WORKS_NAME})"
     ))?;
     let rows = stmt.query_map([], |row| {
-        Ok((row.get(0)?, row.get(1)?))
+        Ok((row.get(0)?, row.get::<_, String>(1)?))
     })?;
-    let works: Vec<(RJCode, String)> = rows.collect::<Result<Vec<_>, _>>()?;
+    let works: Vec<(RJCode, String)> = rows
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(|(rjcode, path)| (rjcode, resolve_stored_path(config, &path)))
+        .collect();
     Ok(works)
 }
 
@@ -482,19 +495,22 @@ pub fn save_track_parsing_preference(
     Ok(())
 }
 
-/// Update folder path for a work in database
+/// Update folder path for a work in database. Stored in portable `$library`/`$source` form
+/// (see `crate::paths`).
 pub fn update_folder_path(
     conn: &Connection,
+    config: &Config,
     rjcode: &RJCode,
     new_path: &str,
 ) -> Result<usize, HvtError> {
+    let stored_path = crate::paths::to_stored_path(config, new_path);
     let rows = conn.execute(
         &format!(
             "UPDATE {DB_FOLDERS_NAME}
              SET path = ?1
              WHERE rjcode = ?2"
         ),
-        params![new_path, rjcode],
+        params![stored_path, rjcode],
     )?;
     Ok(rows)
 }

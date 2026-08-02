@@ -1,11 +1,13 @@
 use rusqlite::{params, Connection};
 
+use crate::config::Config;
 use crate::database::custom_circles;
 use crate::database::custom_cvs;
 use crate::database::custom_tags;
 use crate::database::tables::*;
 use crate::errors::HvtError;
 use crate::folders::types::RJCode;
+use crate::paths::{resolve_stored_path, to_stored_path};
 
 /// One row in the works list (used by both the full-page load and the htmx search partial).
 #[derive(Debug, Clone)]
@@ -199,7 +201,7 @@ pub fn count_work_summaries(conn: &Connection, filter: &WorkFilter) -> Result<i6
 /// Full detail for a single work, or `None` if the RJcode isn't in the database.
 /// Reuses the existing merge helpers (`get_merged_tags_for_work`,
 /// `get_merged_circle_name_for_work`) rather than re-deriving that logic here.
-pub fn get_work_detail(conn: &Connection, rjcode: &RJCode) -> Result<Option<WorkDetail>, HvtError> {
+pub fn get_work_detail(conn: &Connection, config: &Config, rjcode: &RJCode) -> Result<Option<WorkDetail>, HvtError> {
     let base: Option<(i64, String, String)> = conn
         .query_row(
             &format!(
@@ -220,6 +222,7 @@ pub fn get_work_detail(conn: &Connection, rjcode: &RJCode) -> Result<Option<Work
     let Some((fld_id, name, folder_path)) = base else {
         return Ok(None);
     };
+    let folder_path = resolve_stored_path(config, &folder_path);
 
     let circle_rgcode: Option<String> = conn
         .query_row(
@@ -277,7 +280,7 @@ pub fn get_work_detail(conn: &Connection, rjcode: &RJCode) -> Result<Option<Work
 }
 
 /// The work's folder path, used to locate `folder.jpeg` for cover serving.
-pub fn get_folder_path(conn: &Connection, rjcode: &str) -> Result<Option<String>, HvtError> {
+pub fn get_folder_path(conn: &Connection, config: &Config, rjcode: &str) -> Result<Option<String>, HvtError> {
     let path: Option<String> = conn
         .query_row(
             &format!("SELECT path FROM {DB_FOLDERS_NAME} WHERE rjcode = ?1"),
@@ -285,7 +288,7 @@ pub fn get_folder_path(conn: &Connection, rjcode: &str) -> Result<Option<String>
             |row| row.get(0),
         )
         .ok();
-    Ok(path)
+    Ok(path.map(|p| resolve_stored_path(config, &p)))
 }
 
 /// Resolves a DLSite tag's numeric id to its name — mutation routes take an id (not a name)
@@ -415,10 +418,11 @@ pub fn get_cv_name_by_id(conn: &Connection, cv_id: i64) -> Result<Option<String>
 /// files-untouched inconsistency if the move fails. Deliberately touches only `folders`; every
 /// child row (tags/circle/cv/rating/stars/release_date) is left intact so the work stays fully
 /// restorable by moving the folder back and flipping `active` to 1 by hand.
-pub fn deactivate_and_relocate_work(conn: &Connection, rjcode: &RJCode, new_path: &str) -> Result<(), HvtError> {
+pub fn deactivate_and_relocate_work(conn: &Connection, config: &Config, rjcode: &RJCode, new_path: &str) -> Result<(), HvtError> {
+    let stored_path = to_stored_path(config, new_path);
     conn.execute(
         &format!("UPDATE {DB_FOLDERS_NAME} SET active = 0, path = ?1 WHERE rjcode = ?2"),
-        params![new_path, rjcode.as_str()],
+        params![stored_path, rjcode.as_str()],
     )?;
     Ok(())
 }

@@ -5,3 +5,9 @@ target/
 CLAUDE.md
 .vscode/
 RJ*
+
+# Docker Compose local runtime data (see docker-compose.yml)
+/hvtag-data/
+/gluetun/
+/import/
+/library/

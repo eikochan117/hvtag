@@ -92,7 +92,7 @@ pub async fn run_import_workflow(
     // fld_id during this same run. The path will be updated to the library path after the move.
     progress.phase("Registering folders in database");
     for folder in &folders_to_process {
-        if let Err(e) = register_folders(db, vec![folder.clone()]) {
+        if let Err(e) = register_folders(db, app_config, vec![folder.clone()]) {
             progress.log(&format!("Failed to register {} in DB: {}", folder.rjcode, e));
         }
     }
@@ -285,7 +285,7 @@ pub async fn run_import_workflow(
             Ok(_) => {
                 // Update path to final library location (folder was already registered earlier)
                 let target_path_str = target.to_string_lossy().to_string();
-                if let Err(e) = queries::update_folder_path(db, &folder.rjcode, &target_path_str) {
+                if let Err(e) = queries::update_folder_path(db, app_config, &folder.rjcode, &target_path_str) {
                     progress.log(&format!(
                         "Moved {} but failed to update path in DB: {}",
                         folder.rjcode, e

@@ -23,7 +23,7 @@ pub async fn htmx_js() -> impl IntoResponse {
 pub async fn cover_image(State(state): State<AppState>, Path(rjcode): Path<String>) -> Response {
     let folder_path = {
         let conn = state.db.lock().expect("db mutex poisoned");
-        web_queries::get_folder_path(&conn, &rjcode).ok().flatten()
+        web_queries::get_folder_path(&conn, &state.config, &rjcode).ok().flatten()
     };
 
     if let Some(folder_path) = folder_path {
