@@ -25,6 +25,8 @@ fn get_cache_dir() -> Result<PathBuf, HvtError> {
 /// * `url` - The URL of the image to download
 /// * `rjcode` - The RJ code of the work (used as cache filename)
 /// * `target_size` - Optional target size (width, height) for resizing. If None, keeps original size.
+/// * `client` - HTTP client to use (e.g. the VPN/proxy-routed DLSite client). Falls back to a
+///   plain default client if `None`.
 ///
 /// # Returns
 /// Ok(PathBuf) with path to cached cover, Err if download or save fails
@@ -32,11 +34,14 @@ pub async fn download_cover_to_cache(
     url: &str,
     rjcode: &str,
     target_size: Option<(u32, u32)>,
+    client: Option<&reqwest::Client>,
 ) -> Result<PathBuf, HvtError> {
     // Download image from URL
-    let response = reqwest::get(url)
-        .await
-        .map_err(|e| HvtError::Http(format!("Failed to download cover art: {}", e)))?;
+    let response = match client {
+        Some(client) => client.get(url).send().await,
+        None => reqwest::get(url).await,
+    }
+    .map_err(|e| HvtError::Http(format!("Failed to download cover art: {}", e)))?;
 
     if !response.status().is_success() {
         return Err(HvtError::Http(format!(
@@ -113,6 +118,8 @@ pub fn copy_cover_from_cache(
 /// * `url` - The URL of the image to download
 /// * `folder_path` - The path to the folder where folder.jpeg will be saved
 /// * `target_size` - Optional target size (width, height) for resizing. If None, keeps original size.
+/// * `client` - HTTP client to use (e.g. the VPN/proxy-routed DLSite client). Falls back to a
+///   plain default client if `None`.
 ///
 /// # Returns
 /// Ok(()) if successful, Err if download or save fails
@@ -120,12 +127,15 @@ pub async fn download_and_save_cover(
     url: &str,
     folder_path: &Path,
     target_size: Option<(u32, u32)>,
+    client: Option<&reqwest::Client>,
 ) -> Result<(), HvtError> {
     // Download image from URL
     debug!("Downloading cover from: {}", url);
-    let response = reqwest::get(url)
-        .await
-        .map_err(|e| HvtError::Http(format!("Failed to download cover art: {}", e)))?;
+    let response = match client {
+        Some(client) => client.get(url).send().await,
+        None => reqwest::get(url).await,
+    }
+    .map_err(|e| HvtError::Http(format!("Failed to download cover art: {}", e)))?;
 
     if !response.status().is_success() {
         return Err(HvtError::Http(format!(

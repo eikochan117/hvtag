@@ -34,7 +34,7 @@ pub async fn assign_data_to_work_with_client(
 ) -> Result<(), HvtError> {
     let wd = WorkDetails::build_from_rjcode_with_client(work.as_str().to_string(), client).await
         .map_err(|x: Box<dyn std::error::Error>| HvtError::Http(x.to_string()))?;
-    let sr = DlSiteProductScrapResult::build_from_rjcode_with_client(work.as_str().to_string(), client).await;
+    let sr = DlSiteProductScrapResult::build_from_rjcode_with_client(work.as_str().to_string(), client).await?;
 
     if sr.genre.is_empty() {
         return Err(HvtError::RemovedWork(work));

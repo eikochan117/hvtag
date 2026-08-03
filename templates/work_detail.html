@@ -42,6 +42,10 @@
     </dl>
 
     <p style="margin-top:1.5rem; display:flex; gap:0.6rem;">
+      <button hx-post="/works/{{ work.rjcode }}/rescan" hx-swap="none"
+              hx-confirm="Re-fetch metadata (tags/circle/CVs/rating/cover) from DLSite and re-tag the audio files for {{ work.rjcode }}?">
+        Rescan this work
+      </button>
       <button class="danger" hx-post="/works/{{ work.rjcode }}/trash" hx-swap="none"
               hx-confirm="Move this work's folder to a sibling .trash directory and remove it from the library listing? This is reversible (move the folder back and set active=1 in the database) but there's no restore button in the UI yet.">
         Trash this work

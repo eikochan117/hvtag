@@ -18,6 +18,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/works", get(works::works_list_page))
         .route("/works/search", get(works::works_search_partial))
         .route("/works/{rjcode}", get(works::work_detail_page))
+        .route("/works/{rjcode}/rescan", post(works::rescan_work))
         .route("/works/{rjcode}/trash", post(works::trash_work))
         .route("/works/{rjcode}/delete", post(works::delete_work))
         .route("/cvs", get(cvs::cvs_page))

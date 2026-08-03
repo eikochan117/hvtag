@@ -196,6 +196,7 @@ pub async fn run_import_workflow(
                             &cover_url,
                             &folder.rjcode.to_string(),
                             Some((500, 500)),
+                            Some(&http_client),
                         )
                         .await
                         {

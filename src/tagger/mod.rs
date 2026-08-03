@@ -76,6 +76,7 @@ pub async fn process_work_folder(
                 &cover_url,
                 folder_path,
                 None,  // Keep original dimensions from DLSite
+                None,  // No VPN/proxy client here — runs post-VPN-disconnect
             ).await {
                 Ok(_) => info!("Cover art downloaded successfully"),
                 Err(e) => warn!("Failed to download cover art: {}", e),

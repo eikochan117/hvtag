@@ -184,6 +184,29 @@ pub async fn work_detail_page(
     Ok(Html(html).into_response())
 }
 
+/// POST /works/{rjcode}/rescan — starts a single-work refresh (re-fetch metadata/cover, re-tag
+/// files) as a background job, then redirects to `/import`'s live console page, which reattaches
+/// to whatever job is currently running (see `import_status`/`import_ws`) — this button and the
+/// `--full` import share the same one-job-at-a-time slot in `JobManager`.
+pub async fn rescan_work(State(state): State<AppState>, Path(rjcode): Path<String>) -> AppResult<Response> {
+    let rjcode = match RJCode::new(rjcode) {
+        Ok(code) => code,
+        Err(_) => return Ok((StatusCode::NOT_FOUND, "Invalid work code").into_response()),
+    };
+
+    {
+        let conn = state.db.lock().expect("db mutex poisoned");
+        if !crate::database::queries::rjcode_exists(&conn, &rjcode)? {
+            return Ok((StatusCode::NOT_FOUND, "Work not found").into_response());
+        }
+    }
+
+    match state.jobs.start_retag(rjcode, state.config.clone(), state.db_path.clone()).await {
+        Ok(()) => Ok((StatusCode::OK, [("HX-Redirect", "/import")]).into_response()),
+        Err(msg) => Ok((StatusCode::CONFLICT, msg).into_response()),
+    }
+}
+
 /// POST /works/{rjcode}/trash — moves the work's folder to a SIBLING `.trash/<rjcode>` dir
 /// (i.e. `<parent-of-folder_path>/.trash/<rjcode>`, not a globally configured trash path — this
 /// guarantees the move stays on the same volume/share, so `move_folder_cross_drive` takes its
