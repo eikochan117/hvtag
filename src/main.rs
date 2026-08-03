@@ -75,6 +75,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
+    info!(
+        "hvtag v{} (built {})",
+        env!("CARGO_PKG_VERSION"),
+        env!("HVTAG_BUILD_DATE")
+    );
+
     let args = PrgmArgs::parse();
     let db = open_db(None)?;
     init(&db)?;

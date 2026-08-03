@@ -6,6 +6,7 @@ use crate::database::web_queries;
 use crate::web::state::AppState;
 
 const HTMX_JS: &str = include_str!("../../../static/vendor/htmx.min.js");
+const FAVICON_PNG: &[u8] = include_bytes!("../../../static/vendor/favicon.png");
 
 const PLACEHOLDER_COVER_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480">
 <rect width="480" height="480" fill="#2a2a2a"/>
@@ -16,6 +17,11 @@ const PLACEHOLDER_COVER_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" 
 /// phone connects only over VPN and may have no general internet route).
 pub async fn htmx_js() -> impl IntoResponse {
     ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8")], HTMX_JS)
+}
+
+/// GET /static/favicon.png — vendored, embedded at compile time.
+pub async fn favicon() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/png")], FAVICON_PNG)
 }
 
 /// GET /covers/{rjcode} — serves `<folder_path>/folder.jpeg`, or an inline SVG placeholder if

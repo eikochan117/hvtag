@@ -36,6 +36,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/circles/{cir_id}/reset", post(circles::reset_preference))
         .route("/covers/{rjcode}", get(static_assets::cover_image))
         .route("/static/htmx.min.js", get(static_assets::htmx_js))
+        .route("/static/favicon.png", get(static_assets::favicon))
         .route("/import", get(import::import_page))
         .route("/import/status", get(import::import_status))
         .route("/import/start", post(import::start_import))
